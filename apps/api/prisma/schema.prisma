@@ -158,8 +158,13 @@ model Channel {
   phoneNumberId        String?
   wabaId               String?
   accessTokenHash      String?
+  accessTokenCiphertext String?
   verifyToken          String?
   appSecretHash        String?
+  appSecretCiphertext  String?
+  difyAppId            String?
+  difyAppApiKeyHash    String?
+  difyAppApiKeyCiphertext String?
   status               String       @default("configured")
   lastError            String?
   updatedByUserId      String?
@@ -187,6 +192,7 @@ model MessageEvent {
   textBody       String?
   rawPayload     Json
   status         String       @default("received")
+  lastError      String?
   organization   Organization @relation(fields: [organizationId], references: [id])
   channel        Channel      @relation(fields: [channelId], references: [id])
   createdAt      DateTime     @default(now())

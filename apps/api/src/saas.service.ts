@@ -1,5 +1,5 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException, UnauthorizedException } from '@nestjs/common';
-import { createHash, createHmac, timingSafeEqual } from 'crypto';
+import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes, timingSafeEqual } from 'crypto';
 import { mkdir, writeFile } from 'fs/promises';
 import path from 'path';
 import { Prisma } from '@prisma/client';
@@ -25,6 +25,40 @@ function hashPassword(password?: string) {
 function hashSecret(secret?: string) {
   if (!secret) return null;
   return `sha256:${createHash('sha256').update(secret).digest('hex')}`;
+}
+
+function channelSecretKey() {
+  return createHash('sha256').update(process.env.CHANNEL_SECRET_KEY || authSecret()).digest();
+}
+
+function encryptSecret(secret?: string) {
+  if (!secret) return null;
+  const iv = randomBytes(12);
+  const cipher = createCipheriv('aes-256-gcm', channelSecretKey(), iv);
+  const encrypted = Buffer.concat([cipher.update(secret, 'utf8'), cipher.final()]);
+  return `enc:v1:${iv.toString('base64url')}:${cipher.getAuthTag().toString('base64url')}:${encrypted.toString('base64url')}`;
+}
+
+function decryptSecret(ciphertext?: string | null) {
+  if (!ciphertext) return null;
+  const [prefix, version, iv, tag, encrypted] = ciphertext.split(':');
+  if (prefix !== 'enc' || version !== 'v1' || !iv || !tag || !encrypted) throw new Error('Invalid encrypted secret format');
+  const decipher = createDecipheriv('aes-256-gcm', channelSecretKey(), Buffer.from(iv, 'base64url'));
+  decipher.setAuthTag(Buffer.from(tag, 'base64url'));
+  return Buffer.concat([decipher.update(Buffer.from(encrypted, 'base64url')), decipher.final()]).toString('utf8');
+}
+
+function difyAppApiBaseUrl() {
+  return trimTrailingSlash(process.env.DIFY_APP_API_BASE_URL || 'http://localhost:5001/v1');
+}
+
+function metaGraphApiBaseUrl() {
+  return trimTrailingSlash(process.env.META_GRAPH_API_BASE_URL || 'https://graph.facebook.com/v19.0');
+}
+
+function sanitizeIntegrationError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.replace(/Bearer\s+[^\s,}]+/gi, 'Bearer [REDACTED]');
 }
 
 function publicApiBaseUrl() {
@@ -298,7 +332,7 @@ export class SaasService {
     });
   }
 
-  private publicChannel(channel: { id: string; organizationId: string; channelType: string; phoneNumberId?: string | null; wabaId?: string | null; accessTokenHash?: string | null; verifyToken?: string | null; appSecretHash?: string | null; status: string; lastError?: string | null; updatedByUserId?: string | null; createdAt: Date; updatedAt: Date }) {
+  private publicChannel(channel: { id: string; organizationId: string; channelType: string; phoneNumberId?: string | null; wabaId?: string | null; accessTokenHash?: string | null; verifyToken?: string | null; appSecretHash?: string | null; difyAppId?: string | null; difyAppApiKeyHash?: string | null; status: string; lastError?: string | null; updatedByUserId?: string | null; createdAt: Date; updatedAt: Date }) {
     return {
       id: channel.id,
       organizationId: channel.organizationId,
@@ -311,6 +345,8 @@ export class SaasService {
       hasAccessToken: Boolean(channel.accessTokenHash),
       hasVerifyToken: Boolean(channel.verifyToken),
       hasAppSecret: Boolean(channel.appSecretHash),
+      difyAppId: channel.difyAppId,
+      hasDifyAppApiKey: Boolean(channel.difyAppApiKeyHash),
       webhookUrl: `${publicApiBaseUrl()}/webhooks/meta`,
       createdAt: channel.createdAt,
       updatedAt: channel.updatedAt
@@ -325,7 +361,7 @@ export class SaasService {
     return this.publicChannel(channel);
   }
 
-  async saveWhatsappChannel(authorization: string | undefined, input: { phoneNumberId?: string; wabaId?: string; accessToken?: string; verifyToken?: string; appSecret?: string }) {
+  async saveWhatsappChannel(authorization: string | undefined, input: { phoneNumberId?: string; wabaId?: string; accessToken?: string; verifyToken?: string; appSecret?: string; difyAppId?: string; difyAppApiKey?: string }) {
     const user = await this.requireUser(authorization);
     if (!user.organizationId) throw new ForbiddenException('Organization is required');
     const existingChannel = await this.db.channel.findUnique({ where: { organizationId_channelType: { organizationId: user.organizationId, channelType: 'whatsapp' } } });
@@ -340,8 +376,13 @@ export class SaasService {
           phoneNumberId: input.phoneNumberId,
           wabaId: input.wabaId,
           accessTokenHash: input.accessToken ? hashSecret(input.accessToken) : existingChannel?.accessTokenHash,
+          accessTokenCiphertext: input.accessToken ? encryptSecret(input.accessToken) : existingChannel?.accessTokenCiphertext,
           verifyToken: input.verifyToken,
           appSecretHash: input.appSecret ? hashSecret(input.appSecret) : existingChannel?.appSecretHash,
+          appSecretCiphertext: input.appSecret ? encryptSecret(input.appSecret) : existingChannel?.appSecretCiphertext,
+          difyAppId: input.difyAppId ?? existingChannel?.difyAppId,
+          difyAppApiKeyHash: input.difyAppApiKey ? hashSecret(input.difyAppApiKey) : existingChannel?.difyAppApiKeyHash,
+          difyAppApiKeyCiphertext: input.difyAppApiKey ? encryptSecret(input.difyAppApiKey) : existingChannel?.difyAppApiKeyCiphertext,
           status: 'configured',
           lastError: null,
           updatedByUserId: user.id
@@ -353,8 +394,13 @@ export class SaasService {
           phoneNumberId: input.phoneNumberId,
           wabaId: input.wabaId,
           accessTokenHash: input.accessToken ? hashSecret(input.accessToken) : existingChannel?.accessTokenHash,
+          accessTokenCiphertext: input.accessToken ? encryptSecret(input.accessToken) : existingChannel?.accessTokenCiphertext,
           verifyToken: input.verifyToken,
           appSecretHash: input.appSecret ? hashSecret(input.appSecret) : existingChannel?.appSecretHash,
+          appSecretCiphertext: input.appSecret ? encryptSecret(input.appSecret) : existingChannel?.appSecretCiphertext,
+          difyAppId: input.difyAppId,
+          difyAppApiKeyHash: input.difyAppApiKey ? hashSecret(input.difyAppApiKey) : null,
+          difyAppApiKeyCiphertext: input.difyAppApiKey ? encryptSecret(input.difyAppApiKey) : null,
           status: 'configured',
           updatedByUserId: user.id
         }
@@ -367,7 +413,7 @@ export class SaasService {
           action: 'whatsapp_channel_saved',
           targetType: 'channel',
           targetId: savedChannel.id,
-          metadata: { phoneNumberId: input.phoneNumberId, wabaId: input.wabaId, hasAppSecret: Boolean(input.appSecret) }
+          metadata: { phoneNumberId: input.phoneNumberId, wabaId: input.wabaId, hasAppSecret: Boolean(input.appSecret), hasDifyApp: Boolean(input.difyAppId), hasDifyAppApiKey: Boolean(input.difyAppApiKey) }
         }
       });
       return savedChannel;
@@ -391,6 +437,8 @@ export class SaasService {
     let processed = 0;
     let duplicates = 0;
     let ignored = 0;
+    let repliesSent = 0;
+    let repliesFailed = 0;
 
     for (const item of messages) {
       const channel = await this.db.channel.findFirst({ where: { channelType: 'whatsapp', phoneNumberId: item.phoneNumberId, status: 'configured' } });
@@ -405,7 +453,7 @@ export class SaasService {
         continue;
       }
 
-      await this.db.messageEvent.create({
+      const inboundEvent = await this.db.messageEvent.create({
         data: {
           id: id('evt'),
           organizationId: channel.organizationId,
@@ -422,9 +470,86 @@ export class SaasService {
         }
       });
       processed += 1;
+
+      try {
+        const replyStatus = await this.processInboundWhatsappMessage(channel, inboundEvent, item);
+        if (replyStatus === 'sent') repliesSent += 1;
+      } catch (error) {
+        repliesFailed += 1;
+        const lastError = sanitizeIntegrationError(error);
+        await this.db.messageEvent.update({ where: { id: inboundEvent.id }, data: { status: 'failed', lastError } });
+        await this.db.channel.update({ where: { id: channel.id }, data: { lastError } });
+      }
     }
 
-    return { received: true, processed, duplicates, ...(ignored ? { ignored } : {}) };
+    return { received: true, processed, duplicates, ...(ignored ? { ignored } : {}), ...(repliesSent ? { repliesSent } : {}), ...(repliesFailed ? { repliesFailed } : {}) };
+  }
+
+  private async processInboundWhatsappMessage(
+    channel: { id: string; organizationId: string; phoneNumberId: string | null; accessTokenCiphertext?: string | null; difyAppApiKeyCiphertext?: string | null },
+    inboundEvent: { id: string; eventId: string },
+    item: { fromId?: string; messageType?: string; textBody?: string; rawPayload: Record<string, unknown> }
+  ) {
+    if (item.messageType !== 'text' || !item.textBody || !item.fromId || !channel.phoneNumberId || !channel.accessTokenCiphertext || !channel.difyAppApiKeyCiphertext) {
+      return 'skipped' as const;
+    }
+
+    const difyApiKey = decryptSecret(channel.difyAppApiKeyCiphertext);
+    const whatsappAccessToken = decryptSecret(channel.accessTokenCiphertext);
+    if (!difyApiKey || !whatsappAccessToken) return 'skipped' as const;
+
+    const difyReply = await this.callDifyAppApi({ apiKey: difyApiKey, query: item.textBody, user: item.fromId, eventId: inboundEvent.eventId });
+    if (!difyReply.answer) return 'skipped' as const;
+
+    const whatsappResult = await this.sendWhatsappTextReply({ accessToken: whatsappAccessToken, phoneNumberId: channel.phoneNumberId, to: item.fromId, body: difyReply.answer });
+    const outboundEventId = whatsappResult.messageId || `outbound_${inboundEvent.eventId}`;
+
+    await this.db.$transaction(async tx => {
+      await tx.messageEvent.update({ where: { id: inboundEvent.id }, data: { status: 'processed', lastError: null } });
+      await tx.messageEvent.create({
+        data: {
+          id: id('evt'),
+          organizationId: channel.organizationId,
+          channelId: channel.id,
+          channelType: 'whatsapp',
+          direction: 'outbound',
+          eventId: outboundEventId,
+          fromId: channel.phoneNumberId,
+          toId: item.fromId,
+          messageType: 'text',
+          textBody: difyReply.answer,
+          rawPayload: { dify: difyReply.raw, whatsapp: whatsappResult.raw } as Prisma.InputJsonObject,
+          status: 'sent'
+        }
+      });
+      await tx.channel.update({ where: { id: channel.id }, data: { lastError: null } });
+    });
+
+    return 'sent' as const;
+  }
+
+  private async callDifyAppApi(input: { apiKey: string; query: string; user: string; eventId: string }) {
+    const response = await fetch(`${difyAppApiBaseUrl()}/chat-messages`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${input.apiKey}` },
+      body: JSON.stringify({ inputs: {}, query: input.query, response_mode: 'blocking', user: input.user, conversation_id: '', metadata: { source: 'whatsapp', eventId: input.eventId } })
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(`Dify App API failed with HTTP ${response.status}`);
+    const answer = typeof data?.answer === 'string' ? data.answer : '';
+    return { answer, raw: data as Record<string, unknown> };
+  }
+
+  private async sendWhatsappTextReply(input: { accessToken: string; phoneNumberId: string; to: string; body: string }) {
+    const response = await fetch(`${metaGraphApiBaseUrl()}/${encodeURIComponent(input.phoneNumberId)}/messages`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${input.accessToken}` },
+      body: JSON.stringify({ messaging_product: 'whatsapp', to: input.to, type: 'text', text: { body: input.body } })
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(`WhatsApp Cloud API failed with HTTP ${response.status}`);
+    const firstMessage = Array.isArray(data?.messages) ? data.messages[0] as { id?: string } | undefined : undefined;
+    return { messageId: firstMessage?.id, raw: data as Record<string, unknown> };
   }
 
   private extractWhatsappMessages(payload: unknown) {

@@ -265,6 +265,8 @@ wabaId
 accessToken
 verifyToken
 appSecret optional
+difyAppId optional
+difyAppApiKey optional
 ```
 
 الـ API يرجع بيانات غير سرية فقط:
@@ -276,15 +278,18 @@ status
 hasAccessToken
 hasVerifyToken
 hasAppSecret
+difyAppId
+hasDifyAppApiKey
 webhookUrl
 ```
 
 مهم:
 
-- لا يتم إرجاع `accessToken` أو `appSecret` للـ frontend.
+- لا يتم إرجاع `accessToken` أو `appSecret` أو `difyAppApiKey` للـ frontend.
+- يتم تخزين WhatsApp/Dify secrets كـ encrypted ciphertext مع hash للـ flags، وليس كـ plain text.
 - يتم تسجيل `whatsapp_channel_saved` داخل audit logs بدون أسرار.
-- صفحة `/integrations` أصبحت تعرض form لحفظ إعدادات WhatsApp وWebhook URL الذي سيتم استخدامه لاحقًا في Meta Developer Console.
-- الخطوة التالية حسب الملف: Meta webhook verification + inbound receive + idempotency ثم ربط Dify App.
+- صفحة `/integrations` تعرض form لحفظ إعدادات WhatsApp وWebhook URL وربط Dify App API key.
+- تم إنجاز Meta webhook verification + inbound receive + idempotency، والمرحلة الحالية تضيف Dify reply dispatch.
 
 ## Meta webhook verification + inbound receive
 
@@ -307,7 +312,7 @@ POST /webhooks/meta
 - يستخدم `message.id` كـ idempotency key لمنع تكرار نفس الرسالة عند إعادة إرسال Meta للـ webhook.
 - يتجاهل الرسائل القادمة لأرقام غير مفعّلة بدل كسر webhook endpoint.
 
-الاستجابة الحالية تكون مثل:
+الاستجابة تكون مثل:
 
 ```json
 { "received": true, "processed": 1, "duplicates": 0 }
@@ -319,4 +324,41 @@ POST /webhooks/meta
 { "received": true, "processed": 0, "duplicates": 1 }
 ```
 
-الخطوة التالية حسب الملف: ربط كل inbound message بـ Dify App API ثم إرسال الرد إلى WhatsApp Cloud API.
+## WhatsApp inbound → Dify App API → Cloud API reply
+
+تمت إضافة خطوة الرد التلقائي ضمن Phase 3:
+
+- عندما تصل رسالة WhatsApp text جديدة لقناة مربوطة بـ `difyAppApiKey`، يستدعي الـ Gateway:
+  `POST {DIFY_APP_API_BASE_URL}/chat-messages`
+- يستخدم body بنمط Dify App API:
+  `inputs`, `query`, `response_mode=blocking`, `user`, وmetadata لمصدر الرسالة.
+- يأخذ `answer` من Dify ويحفظ outbound `message_event`.
+- يرسل الرد إلى WhatsApp Cloud API:
+  `POST {META_GRAPH_API_BASE_URL}/{phoneNumberId}/messages`
+- يحفظ inbound event بالحالة `processed` عند نجاح الإرسال.
+- عند فشل Dify أو WhatsApp لا يسقط webhook endpoint؛ يتم وضع inbound event في `failed` مع `lastError` بدون أسرار.
+- عند duplicate inbound message لا يتم استدعاء Dify أو WhatsApp مرة ثانية.
+
+متغيرات البيئة الجديدة:
+
+```text
+DIFY_APP_API_BASE_URL=https://your-dify.example.com/v1
+META_GRAPH_API_BASE_URL=https://graph.facebook.com/v19.0
+CHANNEL_SECRET_KEY=change-me-long-random-secret
+```
+
+مهم: `CHANNEL_SECRET_KEY` لازم يظل ثابتًا بين التشغيلات حتى يمكن فك تشفير tokens المخزنة.
+
+استجابة webhook عند إرسال رد ناجح:
+
+```json
+{ "received": true, "processed": 1, "duplicates": 0, "repliesSent": 1 }
+```
+
+وعند فشل Dify/WhatsApp:
+
+```json
+{ "received": true, "processed": 1, "duplicates": 0, "repliesFailed": 1 }
+```
+
+الخطوة التالية حسب الملف: تحسين retries/status callbacks وواجهة test message من داخل `/integrations`.

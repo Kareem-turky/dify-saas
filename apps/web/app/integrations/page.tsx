@@ -15,6 +15,8 @@ type WhatsappChannel = {
   hasAccessToken: boolean;
   hasVerifyToken: boolean;
   hasAppSecret: boolean;
+  difyAppId?: string | null;
+  hasDifyAppApiKey: boolean;
   webhookUrl: string;
   updatedAt: string;
 };
@@ -60,7 +62,9 @@ export default function IntegrationsPage(){
       wabaId: String(formData.get('wabaId') || ''),
       accessToken: String(formData.get('accessToken') || ''),
       verifyToken: String(formData.get('verifyToken') || ''),
-      appSecret: String(formData.get('appSecret') || '') || undefined
+      appSecret: String(formData.get('appSecret') || '') || undefined,
+      difyAppId: String(formData.get('difyAppId') || '') || undefined,
+      difyAppApiKey: String(formData.get('difyAppApiKey') || '') || undefined
     };
 
     setMessage('جاري حفظ إعدادات WhatsApp...');
@@ -80,13 +84,14 @@ export default function IntegrationsPage(){
 
   return <main className="shell">
     <h1>Integrations</h1>
-    <p>Phase 3 حسب الخطة: تجهيز Channel settings قبل استقبال Meta webhooks الفعلي.</p>
+    <p>Phase 3 حسب الخطة: WhatsApp channel + Meta webhooks + ربط Dify App للردود.</p>
     {message && <p>{message}</p>}
 
     <div className="grid">
       <div className="item"><h3>WhatsApp Cloud API</h3><p>Status: {channel?.status || 'Not connected'}</p></div>
       <div className="item"><h3>Webhook</h3><p>{channel ? 'Configured URL ready' : 'Save settings to generate URL'}</p></div>
-      <div className="item"><h3>Secrets</h3><p>{channel?.hasAccessToken ? 'Stored server-side' : 'Not stored yet'}</p></div>
+      <div className="item"><h3>Secrets</h3><p>{channel?.hasAccessToken ? 'WhatsApp token stored encrypted' : 'WhatsApp token not stored yet'}</p></div>
+      <div className="item"><h3>Dify App</h3><p>{channel?.hasDifyAppApiKey ? 'Linked for auto-replies' : 'Not linked yet'}</p></div>
     </div>
 
     <section style={{marginTop: 32}}>
@@ -97,6 +102,8 @@ export default function IntegrationsPage(){
         <label>Permanent Access Token<input name="accessToken" type="password" placeholder={channel?.hasAccessToken ? 'Stored — enter a new token to rotate' : 'Meta permanent token'} required={!channel?.hasAccessToken} /></label>
         <label>Verify Token<input name="verifyToken" placeholder={channel?.hasVerifyToken ? 'Stored — enter again to update' : 'Webhook verify token'} required={!channel?.hasVerifyToken} /></label>
         <label>App Secret optional<input name="appSecret" type="password" placeholder={channel?.hasAppSecret ? 'Stored — enter a new secret to rotate' : 'Meta app secret'} /></label>
+        <label>Dify App ID<input name="difyAppId" defaultValue={channel?.difyAppId || ''} placeholder="Dify app id/name for this WhatsApp number" /></label>
+        <label>Dify App API Key<input name="difyAppApiKey" type="password" placeholder={channel?.hasDifyAppApiKey ? 'Stored encrypted — enter a new key to rotate' : 'Dify App API key'} /></label>
         <button className="btn" type="submit">Save WhatsApp settings</button>
       </form>
     </section>
@@ -106,14 +113,14 @@ export default function IntegrationsPage(){
       <div className="item">
         <p>Webhook URL:</p>
         <code>{channel.webhookUrl}</code>
-        <p>Secrets are stored server-side only and are never returned to the browser.</p>
+        <p>WhatsApp/Dify secrets are encrypted server-side only and are never returned to the browser.</p>
         {channel.lastError && <p>Last error: {channel.lastError}</p>}
       </div>
     </section>}
 
     <section style={{marginTop: 32}}>
       <h2>Next</h2>
-      <p>بعد هذه الخطوة نضيف Meta webhook verification + inbound receive + idempotency ثم ربط Dify App.</p>
+      <p>الخطوة التالية: تحسين retries/status callbacks وواجهة اختبار الرسائل من داخل المنصة.</p>
     </section>
   </main>;
 }
