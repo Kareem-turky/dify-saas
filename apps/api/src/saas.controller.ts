@@ -14,4 +14,5 @@ export class SaasController {
   @Post('admin/approvals/:paymentId/approve') approve(@Param('paymentId') paymentId: string, @Body() body: { notes?: string }) { return this.saas.approvePayment(paymentId, body?.notes); }
   @Get('provisioning/jobs') jobs() { return this.saas.listProvisioningJobs(); }
   @Post('provisioning/jobs/:jobId/run') runProvisioningJob(@Param('jobId') jobId: string) { return this.provisioning.runJob(jobId); }
+  @Get('organizations/:organizationId/dashboard') dashboard(@Param('organizationId') organizationId: string) { return this.saas.getOrganizationDashboard(organizationId); }
 }

@@ -1,1 +1,94 @@
-export default function DashboardPage(){const steps=['شاهد فيديو البداية','افتح AI Studio','اربط WhatsApp','اختبر البوت'];return <main className="shell"><h1>Customer Dashboard</h1><p>الحالة الحالية: Pending payment / approval / provisioning / active.</p><div className="grid">{steps.map((s,i)=><div className="item" key={s}><strong>{i+1}. {s}</strong><p>Not connected</p></div>)}</div></main>}
+'use client';
+
+import { useEffect, useState } from 'react';
+
+const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:4000';
+
+type DashboardSummary = {
+  organization: { id: string; name: string; status: string; difyTenantId?: string | null; difyAccountId?: string | null };
+  subscription: { id: string; status: string; planId: string } | null;
+  plan: { id: string; name: string; monthlyPriceEgp: number; messageLimit: number; channelLimit: number; seatLimit: number } | null;
+  payment: { id: string; status: string; method: string; amountEgp: number; reference?: string | null } | null;
+  approval: { id: string; status: string; notes?: string | null } | null;
+  provisioningJob: { id: string; status: string; attempts: number; lastError?: string | null } | null;
+  currentStep: 'submit_payment' | 'wait_for_admin_review' | 'wait_for_ai_studio' | 'open_ai_studio' | 'contact_support';
+  aiStudioUrl: string | null;
+};
+
+const stepCopy: Record<DashboardSummary['currentStep'], { title: string; body: string }> = {
+  submit_payment: { title: 'مطلوب إثبات الدفع', body: 'الحساب اتعمل. ابعت إثبات الدفع عشان يدخل مراجعة الأدمن.' },
+  wait_for_admin_review: { title: 'في انتظار مراجعة الدفع', body: 'الفريق هيراجع الدفع ويفعل الاشتراك.' },
+  wait_for_ai_studio: { title: 'جاري تجهيز AI Studio', body: 'تم قبول الدفع، وجاري تجهيز مساحة Dify الخاصة بالشركة.' },
+  open_ai_studio: { title: 'AI Studio جاهز', body: 'تقدر تبدأ تبني الـ chatflows والـ knowledge bases.' },
+  contact_support: { title: 'مطلوب دعم', body: 'في حالة غير معتادة. كلم الدعم لمراجعة الحساب.' }
+};
+
+function getInitialOrganizationId() {
+  if (typeof window === 'undefined') return '';
+  const params = new URLSearchParams(window.location.search);
+  return params.get('organizationId') || localStorage.getItem('dify_saas_organization_id') || '';
+}
+
+export default function DashboardPage(){
+  const [organizationId, setOrganizationId] = useState('');
+  const [summary, setSummary] = useState<DashboardSummary | null>(null);
+  const [status, setStatus] = useState('');
+
+  useEffect(() => { setOrganizationId(getInitialOrganizationId()); }, []);
+
+  useEffect(() => {
+    if (!organizationId) return;
+    localStorage.setItem('dify_saas_organization_id', organizationId);
+    setStatus('جاري تحميل حالة الحساب...');
+    fetch(`${API_BASE}/organizations/${organizationId}/dashboard`)
+      .then(async response => {
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.message || 'تعذر تحميل لوحة العميل');
+        return data as DashboardSummary;
+      })
+      .then(data => { setSummary(data); setStatus(''); })
+      .catch(error => { setSummary(null); setStatus(error instanceof Error ? error.message : 'حصل خطأ'); });
+  }, [organizationId]);
+
+  const current = summary ? stepCopy[summary.currentStep] : null;
+  const steps = [
+    { key: 'pending_payment', title: 'إثبات الدفع', done: Boolean(summary?.payment) },
+    { key: 'pending_approval', title: 'مراجعة الأدمن', done: summary?.approval?.status === 'approved' },
+    { key: 'provisioning', title: 'تجهيز AI Studio', done: summary?.provisioningJob?.status === 'completed' },
+    { key: 'active', title: 'فتح AI Studio', done: summary?.organization.status === 'active' }
+  ];
+
+  return <main className="shell">
+    <h1>Customer Dashboard</h1>
+    <p>تابع حالة الشركة من الدفع للموافقة ثم تجهيز مساحة Dify الخاصة بالعميل.</p>
+
+    <div className="item" style={{marginTop: 20}}>
+      <strong>Organization ID</strong>
+      <input className="input" value={organizationId} onChange={event => setOrganizationId(event.target.value)} placeholder="org_xxxxxxxx" />
+      {status && <p>{status}</p>}
+    </div>
+
+    {summary && current && <>
+      <div className="card" style={{marginTop: 24}}>
+        <span className="badge">{summary.organization.status}</span>
+        <h2>{current.title}</h2>
+        <p>{current.body}</p>
+        <p><strong>{summary.organization.name}</strong> · {summary.plan?.name || 'No plan'} · {summary.subscription?.status || 'No subscription'}</p>
+        {summary.aiStudioUrl && <a className="btn" href={summary.aiStudioUrl} target="_blank">Open AI Studio</a>}
+      </div>
+
+      <div className="grid">
+        {steps.map((step, index) => <div className="item" key={step.key}>
+          <strong>{index + 1}. {step.title}</strong>
+          <p>{step.done ? 'Completed' : 'Pending'}</p>
+        </div>)}
+      </div>
+
+      <div className="grid">
+        <div className="item"><strong>Payment</strong><p>{summary.payment ? `${summary.payment.status} · ${summary.payment.amountEgp} EGP` : 'لم يتم تسجيل دفع بعد'}</p></div>
+        <div className="item"><strong>Approval</strong><p>{summary.approval?.status || 'لا يوجد طلب مراجعة بعد'}</p></div>
+        <div className="item"><strong>Provisioning</strong><p>{summary.provisioningJob ? `${summary.provisioningJob.status} · attempts ${summary.provisioningJob.attempts}` : 'لم يبدأ بعد'}</p></div>
+      </div>
+    </>}
+  </main>
+}

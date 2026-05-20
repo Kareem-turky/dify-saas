@@ -100,4 +100,43 @@ export class SaasService {
   listProvisioningJobs() {
     return this.db.provisioningJob.findMany({ orderBy: { createdAt: 'desc' } });
   }
+
+  async getOrganizationDashboard(organizationId: string) {
+    const organization = await this.db.organization.findUnique({ where: { id: organizationId } });
+    if (!organization) throw new NotFoundException('Organization not found');
+
+    const subscription = await this.db.subscription.findFirst({
+      where: { organizationId },
+      orderBy: { createdAt: 'desc' },
+      include: { plan: true }
+    });
+    const payment = await this.db.payment.findFirst({ where: { organizationId }, orderBy: { createdAt: 'desc' } });
+    const approval = await this.db.approvalRequest.findFirst({ where: { organizationId }, orderBy: { createdAt: 'desc' } });
+    const provisioningJob = await this.db.provisioningJob.findFirst({ where: { organizationId }, orderBy: { createdAt: 'desc' } });
+
+    const currentStep = organization.status === 'pending_payment'
+      ? 'submit_payment'
+      : organization.status === 'pending_approval'
+        ? 'wait_for_admin_review'
+        : organization.status === 'provisioning'
+          ? 'wait_for_ai_studio'
+          : organization.status === 'active'
+            ? 'open_ai_studio'
+            : 'contact_support';
+
+    const aiStudioUrl = organization.status === 'active' && organization.difyTenantId
+      ? `https://studio.local/tenants/${organization.difyTenantId}`
+      : null;
+
+    return {
+      organization,
+      subscription: subscription ? { id: subscription.id, status: subscription.status, planId: subscription.planId } : null,
+      plan: subscription?.plan ?? null,
+      payment,
+      approval,
+      provisioningJob,
+      currentStep,
+      aiStudioUrl
+    };
+  }
 }
