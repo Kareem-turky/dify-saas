@@ -525,6 +525,8 @@ export class SaasService {
   async receiveMetaWebhook(payload: unknown) {
     const statusCallbacks = this.extractWhatsappStatusCallbacks(payload);
     const statusesUpdated = await this.updateWhatsappStatusCallbacks(statusCallbacks);
+    const messengerStatusCallbacks = this.extractMessengerStatusCallbacks(payload);
+    const messengerStatusesUpdated = await this.updateMessengerStatusCallbacks(messengerStatusCallbacks);
     const messages = this.extractWhatsappMessages(payload);
     const messengerMessages = this.extractMessengerMessages(payload);
     let processed = 0;
@@ -619,7 +621,7 @@ export class SaasService {
       }
     }
 
-    return { received: true, processed, duplicates, ...(ignored ? { ignored } : {}), ...(statusesUpdated ? { statusesUpdated } : {}), ...(repliesSent ? { repliesSent } : {}), ...(repliesFailed ? { repliesFailed } : {}), ...(messengerRepliesSent ? { messengerRepliesSent } : {}), ...(messengerRepliesFailed ? { messengerRepliesFailed } : {}) };
+    return { received: true, processed, duplicates, ...(ignored ? { ignored } : {}), ...(statusesUpdated ? { statusesUpdated } : {}), ...(messengerStatusesUpdated ? { messengerStatusesUpdated } : {}), ...(repliesSent ? { repliesSent } : {}), ...(repliesFailed ? { repliesFailed } : {}), ...(messengerRepliesSent ? { messengerRepliesSent } : {}), ...(messengerRepliesFailed ? { messengerRepliesFailed } : {}) };
   }
 
   async sendWhatsappTestMessage(authorization: string | undefined, input: { to?: string; text?: string }) {
@@ -681,7 +683,7 @@ export class SaasService {
     const failedEvents = await this.db.messageEvent.findMany({
       where: {
         direction: 'inbound',
-        channelType: 'whatsapp',
+        channelType: { in: ['whatsapp', 'messenger'] },
         status: 'failed',
       },
       orderBy: { updatedAt: 'asc' },
@@ -696,12 +698,15 @@ export class SaasService {
       const nextRetryCount = event.retryCount + 1;
       await this.db.messageEvent.update({ where: { id: event.id }, data: { retryCount: nextRetryCount, status: 'retrying' } });
       try {
-        const replyStatus = await this.processInboundWhatsappMessage(event.channel, event, {
+        const messageInput = {
           fromId: event.fromId || undefined,
           messageType: event.messageType || undefined,
           textBody: event.textBody || undefined,
           rawPayload: event.rawPayload as Record<string, unknown>
-        });
+        };
+        const replyStatus = event.channelType === 'messenger'
+          ? await this.processInboundMessengerMessage(event.channel, event, messageInput)
+          : await this.processInboundWhatsappMessage(event.channel, event, messageInput);
         if (replyStatus === 'sent') {
           retried += 1;
         } else {
@@ -768,6 +773,48 @@ export class SaasService {
         }
       });
       updated += 1;
+    }
+    return updated;
+  }
+
+  private async updateMessengerStatusCallbacks(statusCallbacks: Array<{ pageId: string; eventIds?: string[]; status: string; psid?: string; rawPayload: Record<string, unknown> }>) {
+    let updated = 0;
+    for (const callback of statusCallbacks) {
+      if (callback.eventIds?.length) {
+        for (const eventId of callback.eventIds) {
+          const event = await this.db.messageEvent.findUnique({ where: { eventId } });
+          if (!event || event.direction !== 'outbound' || event.channelType !== 'messenger') continue;
+          await this.db.messageEvent.update({
+            where: { id: event.id },
+            data: {
+              status: callback.status,
+              rawPayload: { ...(event.rawPayload as Record<string, unknown>), messengerStatusCallback: { status: callback.status, pageId: callback.pageId, psid: callback.psid, eventIds: callback.eventIds, rawPayload: callback.rawPayload } } as Prisma.InputJsonObject
+            }
+          });
+          updated += 1;
+        }
+        continue;
+      }
+
+      const readEvents = await this.db.messageEvent.findMany({
+        where: {
+          direction: 'outbound',
+          channelType: 'messenger',
+          fromId: callback.pageId,
+          ...(callback.psid ? { toId: callback.psid } : {}),
+          status: { in: ['sent', 'delivered'] }
+        }
+      });
+      for (const event of readEvents) {
+        await this.db.messageEvent.update({
+          where: { id: event.id },
+          data: {
+            status: callback.status,
+            rawPayload: { ...(event.rawPayload as Record<string, unknown>), messengerStatusCallback: { status: callback.status, pageId: callback.pageId, psid: callback.psid, rawPayload: callback.rawPayload } } as Prisma.InputJsonObject
+          }
+        });
+        updated += 1;
+      }
     }
     return updated;
   }
@@ -911,6 +958,43 @@ export class SaasService {
             status: status.status,
             recipientId: status.recipient_id,
             rawPayload: { entry, change, status }
+          });
+        }
+      }
+    }
+
+    return extracted;
+  }
+
+  private extractMessengerStatusCallbacks(payload: unknown) {
+    const root = payload as { entry?: Array<{ id?: string; messaging?: Array<{ sender?: { id?: string }, recipient?: { id?: string }, delivery?: { mids?: string[]; watermark?: number }, read?: { watermark?: number } }> }> };
+    const extracted: Array<{ pageId: string; eventIds?: string[]; status: string; psid?: string; rawPayload: Record<string, unknown> }> = [];
+
+    for (const entry of root.entry || []) {
+      const pageIdFromEntry = entry.id;
+      for (const messaging of entry.messaging || []) {
+        const deliveryMids = messaging.delivery?.mids?.filter(mid => typeof mid === 'string' && mid.length > 0);
+        if (deliveryMids?.length) {
+          const pageId = messaging.sender?.id || pageIdFromEntry;
+          if (!pageId) continue;
+          extracted.push({
+            pageId,
+            eventIds: deliveryMids,
+            status: 'delivered',
+            psid: messaging.recipient?.id,
+            rawPayload: { entry, messaging, delivery: messaging.delivery }
+          });
+          continue;
+        }
+
+        if (messaging.read) {
+          const pageId = messaging.recipient?.id || pageIdFromEntry;
+          if (!pageId) continue;
+          extracted.push({
+            pageId,
+            status: 'read',
+            psid: messaging.sender?.id,
+            rawPayload: { entry, messaging, read: messaging.read }
           });
         }
       }

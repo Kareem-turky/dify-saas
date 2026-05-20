@@ -500,5 +500,34 @@ status = sent
 - عند تكرار نفس `message.mid` من Meta لا يتم استدعاء Dify أو Messenger مرة ثانية.
 - عند فشل Dify أو Messenger Send API يتم تعليم inbound event كـ `failed` مع `lastError` آمن بدون تسريب Page token أو Dify API key.
 
-الخطوة التالية في Phase 4: Messenger retries/status callbacks ثم production hardening: queue/rate limits/dead-letter/monitoring/security review.
+## Messenger retries/status callbacks
+
+تم توسيع جزء `Logs + retry + idempotency` ليشمل Messenger/Page بجانب WhatsApp:
+
+```text
+POST /admin/message-events/retry-failed
+Authorization: Bearer <admin-token>
+```
+
+السلوك:
+
+- يعيد محاولة failed inbound events لقنوات `whatsapp` و`messenger`.
+- عند Messenger retry يستخدم نفس مسار Dify App API ثم Messenger Send API.
+- يزيد `retryCount` لكل محاولة ويترك `lastError` آمن بدون Page token أو Dify API key.
+- يسجل outbound Messenger event جديد عند نجاح retry.
+
+كما تم دعم Messenger delivery/read callbacks داخل:
+
+```text
+POST /webhooks/meta
+```
+
+- `delivery.mids[]` يحدّث matching outbound Messenger events إلى `delivered`.
+- `read` يحدّث outbound Messenger events المطابقة للـ Page/PSID إلى `read` عندما لا توفر Meta message ids.
+- يخزن callback metadata تحت `rawPayload.messengerStatusCallback` بدون أسرار.
+- استجابة webhook تضيف `messengerStatusesUpdated` عند وجود تحديثات.
+
+Phase 4 Messenger functional slice مكتملة حالياً: channel settings + webhook verification + inbound extraction + Dify reply dispatch + Send API + idempotency + failed-message retry + delivery/read callbacks.
+
+الخطوة التالية في Phase 4: production hardening: queue/rate limits/dead-letter/monitoring/security review.
 
