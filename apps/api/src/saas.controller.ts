@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Headers, Param, Post, Put, Query, UploadedFile, UseInterceptors } from '@nestjs/common';
+import { Body, Controller, Get, Headers, Param, Post, Put, Query, Req, UploadedFile, UseInterceptors } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
 import { DifyProvisioningGateway, DifyProvisioningService } from './dify-provisioning.service';
@@ -25,7 +25,7 @@ export class SaasController {
   @Put('channels/messenger') saveMessengerChannel(@Body() body: Parameters<SaasService['saveMessengerChannel']>[1], @Headers('authorization') authorization?: string) { return this.saas.saveMessengerChannel(authorization, body); }
   @Post('channels/whatsapp/test-message') sendWhatsappTestMessage(@Body() body: { to?: string; text?: string }, @Headers('authorization') authorization?: string) { return this.saas.sendWhatsappTestMessage(authorization, body); }
   @Get('webhooks/meta') verifyMetaWebhook(@Query() query: { 'hub.mode'?: string; 'hub.verify_token'?: string; 'hub.challenge'?: string }) { return this.saas.verifyMetaWebhook(query); }
-  @Post('webhooks/meta') receiveMetaWebhook(@Body() body: unknown) { return this.saas.receiveMetaWebhook(body); }
+  @Post('webhooks/meta') receiveMetaWebhook(@Body() body: unknown, @Headers('x-hub-signature-256') signature?: string, @Req() request?: { rawBody?: Buffer }) { return this.saas.receiveMetaWebhook(body, signature, request?.rawBody); }
   @Get('admin/approvals') async listApprovals(@Headers('authorization') authorization?: string) { await this.saas.requireAdmin(authorization); return this.saas.listApprovals(); }
   @Get('admin/audit-logs') async listAuditLogs(@Headers('authorization') authorization?: string) { await this.saas.requireAdmin(authorization); return this.saas.listAuditLogs(); }
   @Post('admin/message-events/retry-failed') async retryFailedMessageEvents(@Body() body: { limit?: number }, @Headers('authorization') authorization?: string) { const admin = await this.saas.requireAdmin(authorization); return this.saas.retryFailedMessageEvents({ limit: body?.limit, actorUserId: admin.id }); }

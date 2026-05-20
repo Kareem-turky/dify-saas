@@ -56,6 +56,31 @@ function metaGraphApiBaseUrl() {
   return trimTrailingSlash(process.env.META_GRAPH_API_BASE_URL || 'https://graph.facebook.com/v19.0');
 }
 
+function metaWebhookSignatureRequired() {
+  return process.env.META_WEBHOOK_SIGNATURE_REQUIRED === 'true';
+}
+
+function metaWebhookAppSecret() {
+  return process.env.META_WEBHOOK_APP_SECRET || '';
+}
+
+function verifyMetaWebhookSignature(payload: unknown, signature?: string, rawBody?: Buffer) {
+  if (!metaWebhookSignatureRequired()) return;
+  const appSecret = metaWebhookAppSecret();
+  if (!appSecret || !signature?.startsWith('sha256=')) {
+    throw new UnauthorizedException('Invalid Meta webhook signature');
+  }
+
+  const signedBody = rawBody ?? Buffer.from(JSON.stringify(payload));
+  const expectedHex = createHmac('sha256', appSecret).update(signedBody).digest('hex');
+  const receivedHex = signature.slice('sha256='.length);
+  const expected = Buffer.from(expectedHex, 'hex');
+  const received = Buffer.from(receivedHex, 'hex');
+  if (expected.length !== received.length || !timingSafeEqual(expected, received)) {
+    throw new UnauthorizedException('Invalid Meta webhook signature');
+  }
+}
+
 function sanitizeIntegrationError(error: unknown) {
   const message = error instanceof Error ? error.message : String(error);
   return message.replace(/Bearer\s+[^\s,}]+/gi, 'Bearer [REDACTED]');
@@ -522,7 +547,8 @@ export class SaasService {
     return query['hub.challenge'];
   }
 
-  async receiveMetaWebhook(payload: unknown) {
+  async receiveMetaWebhook(payload: unknown, signature?: string, rawBody?: Buffer) {
+    verifyMetaWebhookSignature(payload, signature, rawBody);
     const statusCallbacks = this.extractWhatsappStatusCallbacks(payload);
     const statusesUpdated = await this.updateWhatsappStatusCallbacks(statusCallbacks);
     const messengerStatusCallbacks = this.extractMessengerStatusCallbacks(payload);

@@ -529,5 +529,21 @@ POST /webhooks/meta
 
 Phase 4 Messenger functional slice مكتملة حالياً: channel settings + webhook verification + inbound extraction + Dify reply dispatch + Send API + idempotency + failed-message retry + delivery/read callbacks.
 
-الخطوة التالية في Phase 4: production hardening: queue/rate limits/dead-letter/monitoring/security review.
+## Meta webhook signature verification
+
+تمت إضافة أول جزء من production hardening لقنوات Meta:
+
+```text
+META_WEBHOOK_SIGNATURE_REQUIRED=true
+META_WEBHOOK_APP_SECRET=<meta-app-secret>
+```
+
+عند تفعيل الإعدادات:
+
+- `POST /webhooks/meta` يرفض أي request بدون `X-Hub-Signature-256`.
+- يقارن توقيع `sha256=<hmac>` باستخدام `timingSafeEqual`.
+- في التشغيل الإنتاجي يتم تفعيل Nest raw body support حتى يتم توقيع نفس request body القادم من Meta.
+- لو التوقيع غير صحيح يرجع `401 Unauthorized` قبل أي معالجة أو كتابة events.
+
+الخطوة التالية في Phase 4 production hardening: queue/rate limits/dead-letter/monitoring.
 
