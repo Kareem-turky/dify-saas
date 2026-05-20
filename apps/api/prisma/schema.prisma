@@ -38,6 +38,7 @@ model Organization {
   approvals     ApprovalRequest[]
   jobs          ProvisioningJob[]
   channels      Channel[]
+  messageEvents MessageEvent[]
   auditLogs     AuditLog[]
   createdAt     DateTime           @default(now())
   updatedAt     DateTime           @updatedAt
@@ -164,10 +165,34 @@ model Channel {
   updatedByUserId      String?
   organization         Organization @relation(fields: [organizationId], references: [id])
   updatedByUser        User?        @relation(fields: [updatedByUserId], references: [id])
+  messageEvents        MessageEvent[]
   createdAt            DateTime     @default(now())
   updatedAt            DateTime     @updatedAt
 
   @@unique([organizationId, channelType])
   @@index([channelType, phoneNumberId])
+  @@index([status])
+}
+
+model MessageEvent {
+  id             String       @id
+  organizationId String
+  channelId      String
+  channelType    String
+  direction      String
+  eventId        String       @unique
+  fromId         String?
+  toId           String?
+  messageType    String?
+  textBody       String?
+  rawPayload     Json
+  status         String       @default("received")
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  channel        Channel      @relation(fields: [channelId], references: [id])
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@index([organizationId, createdAt])
+  @@index([channelId, createdAt])
   @@index([status])
 }

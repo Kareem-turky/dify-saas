@@ -376,6 +376,83 @@ export class SaasService {
     return this.publicChannel(channel);
   }
 
+  async verifyMetaWebhook(query: { 'hub.mode'?: string; 'hub.verify_token'?: string; 'hub.challenge'?: string }) {
+    if (query['hub.mode'] !== 'subscribe' || !query['hub.verify_token'] || !query['hub.challenge']) {
+      throw new BadRequestException('Invalid Meta webhook verification request');
+    }
+
+    const channel = await this.db.channel.findFirst({ where: { channelType: 'whatsapp', verifyToken: query['hub.verify_token'], status: 'configured' } });
+    if (!channel) throw new ForbiddenException('Invalid Meta webhook verify token');
+    return query['hub.challenge'];
+  }
+
+  async receiveMetaWebhook(payload: unknown) {
+    const messages = this.extractWhatsappMessages(payload);
+    let processed = 0;
+    let duplicates = 0;
+    let ignored = 0;
+
+    for (const item of messages) {
+      const channel = await this.db.channel.findFirst({ where: { channelType: 'whatsapp', phoneNumberId: item.phoneNumberId, status: 'configured' } });
+      if (!channel) {
+        ignored += 1;
+        continue;
+      }
+
+      const existing = await this.db.messageEvent.findUnique({ where: { eventId: item.eventId } });
+      if (existing) {
+        duplicates += 1;
+        continue;
+      }
+
+      await this.db.messageEvent.create({
+        data: {
+          id: id('evt'),
+          organizationId: channel.organizationId,
+          channelId: channel.id,
+          channelType: 'whatsapp',
+          direction: 'inbound',
+          eventId: item.eventId,
+          fromId: item.fromId,
+          toId: item.phoneNumberId,
+          messageType: item.messageType,
+          textBody: item.textBody,
+          rawPayload: item.rawPayload as Prisma.InputJsonObject,
+          status: 'received'
+        }
+      });
+      processed += 1;
+    }
+
+    return { received: true, processed, duplicates, ...(ignored ? { ignored } : {}) };
+  }
+
+  private extractWhatsappMessages(payload: unknown) {
+    const root = payload as { entry?: Array<{ changes?: Array<{ value?: { metadata?: { phone_number_id?: string }, messages?: Array<{ id?: string; from?: string; type?: string; text?: { body?: string } }> } }> }> };
+    const extracted: Array<{ phoneNumberId: string; eventId: string; fromId?: string; messageType?: string; textBody?: string; rawPayload: Record<string, unknown> }> = [];
+
+    for (const entry of root.entry || []) {
+      for (const change of entry.changes || []) {
+        const value = change.value;
+        const phoneNumberId = value?.metadata?.phone_number_id;
+        if (!phoneNumberId) continue;
+        for (const message of value.messages || []) {
+          if (!message.id) continue;
+          extracted.push({
+            phoneNumberId,
+            eventId: message.id,
+            fromId: message.from,
+            messageType: message.type,
+            textBody: message.text?.body,
+            rawPayload: { entry, change, message }
+          });
+        }
+      }
+    }
+
+    return extracted;
+  }
+
   async getOrganizationDashboard(organizationId: string) {
     const organization = await this.db.organization.findUnique({ where: { id: organizationId } });
     if (!organization) throw new NotFoundException('Organization not found');

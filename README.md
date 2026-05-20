@@ -285,3 +285,38 @@ webhookUrl
 - يتم تسجيل `whatsapp_channel_saved` داخل audit logs بدون أسرار.
 - صفحة `/integrations` أصبحت تعرض form لحفظ إعدادات WhatsApp وWebhook URL الذي سيتم استخدامه لاحقًا في Meta Developer Console.
 - الخطوة التالية حسب الملف: Meta webhook verification + inbound receive + idempotency ثم ربط Dify App.
+
+## Meta webhook verification + inbound receive
+
+تمت إضافة أول جزء من استقبال Meta Webhooks في Phase 3:
+
+```text
+GET /webhooks/meta
+```
+
+يدعم Meta challenge verification باستخدام `hub.verify_token` المخزن في إعدادات قناة WhatsApp، ويرجع `hub.challenge` عند نجاح التحقق.
+
+```text
+POST /webhooks/meta
+```
+
+يستقبل payload رسائل WhatsApp من Meta، ثم:
+
+- يحدد قناة العميل من `metadata.phone_number_id`.
+- يحفظ الرسائل inbound في `message_events` مع `organizationId` و`channelId`.
+- يستخدم `message.id` كـ idempotency key لمنع تكرار نفس الرسالة عند إعادة إرسال Meta للـ webhook.
+- يتجاهل الرسائل القادمة لأرقام غير مفعّلة بدل كسر webhook endpoint.
+
+الاستجابة الحالية تكون مثل:
+
+```json
+{ "received": true, "processed": 1, "duplicates": 0 }
+```
+
+أو عند التكرار:
+
+```json
+{ "received": true, "processed": 0, "duplicates": 1 }
+```
+
+الخطوة التالية حسب الملف: ربط كل inbound message بـ Dify App API ثم إرسال الرد إلى WhatsApp Cloud API.
