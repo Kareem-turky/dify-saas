@@ -244,3 +244,44 @@ createdAt
 ```
 
 مهم: audit metadata لا تخزن passwords أو secrets. صفحة `/admin` تعرض آخر audit logs لمساعدة الدعم والتشغيل.
+
+## WhatsApp channel settings foundation
+
+تم بدء Phase 3 بإضافة إعدادات WhatsApp قبل استقبال Meta webhooks الفعلي:
+
+```text
+GET /channels/whatsapp
+Authorization: Bearer <customer-token>
+
+PUT /channels/whatsapp
+Authorization: Bearer <customer-token>
+```
+
+الـ `PUT` يحفظ:
+
+```text
+phoneNumberId
+wabaId
+accessToken
+verifyToken
+appSecret optional
+```
+
+الـ API يرجع بيانات غير سرية فقط:
+
+```text
+phoneNumberId
+wabaId
+status
+hasAccessToken
+hasVerifyToken
+hasAppSecret
+webhookUrl
+```
+
+مهم:
+
+- لا يتم إرجاع `accessToken` أو `appSecret` للـ frontend.
+- يتم تسجيل `whatsapp_channel_saved` داخل audit logs بدون أسرار.
+- صفحة `/integrations` أصبحت تعرض form لحفظ إعدادات WhatsApp وWebhook URL الذي سيتم استخدامه لاحقًا في Meta Developer Console.
+- الخطوة التالية حسب الملف: Meta webhook verification + inbound receive + idempotency ثم ربط Dify App.

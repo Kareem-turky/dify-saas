@@ -20,6 +20,7 @@ model User {
   createdAt         DateTime      @default(now())
   updatedAt         DateTime      @updatedAt
   auditLogs         AuditLog[]
+  updatedChannels   Channel[]
 }
 
 model Organization {
@@ -36,6 +37,7 @@ model Organization {
   paymentProofs PaymentProof[]
   approvals     ApprovalRequest[]
   jobs          ProvisioningJob[]
+  channels      Channel[]
   auditLogs     AuditLog[]
   createdAt     DateTime           @default(now())
   updatedAt     DateTime           @updatedAt
@@ -146,4 +148,26 @@ model AuditLog {
   @@index([organizationId])
   @@index([action])
   @@index([createdAt])
+}
+
+model Channel {
+  id                   String       @id
+  organizationId       String
+  channelType          String
+  phoneNumberId        String?
+  wabaId               String?
+  accessTokenHash      String?
+  verifyToken          String?
+  appSecretHash        String?
+  status               String       @default("configured")
+  lastError            String?
+  updatedByUserId      String?
+  organization         Organization @relation(fields: [organizationId], references: [id])
+  updatedByUser        User?        @relation(fields: [updatedByUserId], references: [id])
+  createdAt            DateTime     @default(now())
+  updatedAt            DateTime     @updatedAt
+
+  @@unique([organizationId, channelType])
+  @@index([channelType, phoneNumberId])
+  @@index([status])
 }

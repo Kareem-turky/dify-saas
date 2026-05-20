@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Headers, Param, Post, UploadedFile, UseInterceptors } from '@nestjs/common';
+import { Body, Controller, Get, Headers, Param, Post, Put, UploadedFile, UseInterceptors } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
 import { DifyProvisioningGateway, DifyProvisioningService } from './dify-provisioning.service';
@@ -19,6 +19,8 @@ export class SaasController {
     return this.saas.storePaymentProof({ organizationId, file });
   }
   @Post('payments/manual-proof') submitManualPayment(@Body() body: Parameters<SaasService['submitManualPayment']>[0]) { return this.saas.submitManualPayment(body); }
+  @Get('channels/whatsapp') getWhatsappChannel(@Headers('authorization') authorization?: string) { return this.saas.getWhatsappChannel(authorization); }
+  @Put('channels/whatsapp') saveWhatsappChannel(@Body() body: Parameters<SaasService['saveWhatsappChannel']>[1], @Headers('authorization') authorization?: string) { return this.saas.saveWhatsappChannel(authorization, body); }
   @Get('admin/approvals') async listApprovals(@Headers('authorization') authorization?: string) { await this.saas.requireAdmin(authorization); return this.saas.listApprovals(); }
   @Get('admin/audit-logs') async listAuditLogs(@Headers('authorization') authorization?: string) { await this.saas.requireAdmin(authorization); return this.saas.listAuditLogs(); }
   @Post('admin/approvals/:paymentId/approve') async approve(@Param('paymentId') paymentId: string, @Body() body: { notes?: string }, @Headers('authorization') authorization?: string) { const admin = await this.saas.requireAdmin(authorization); return this.saas.approvePayment(paymentId, body?.notes, admin.id); }
