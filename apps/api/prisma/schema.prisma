@@ -31,6 +31,7 @@ model Organization {
   users         User[]
   subscriptions Subscription[]
   payments      Payment[]
+  paymentProofs PaymentProof[]
   approvals     ApprovalRequest[]
   jobs          ProvisioningJob[]
   createdAt     DateTime           @default(now())
@@ -72,8 +73,29 @@ model Payment {
   organization   Organization      @relation(fields: [organizationId], references: [id])
   subscription   Subscription      @relation(fields: [subscriptionId], references: [id])
   approvals      ApprovalRequest[]
+  proofs         PaymentProof[]
   createdAt      DateTime          @default(now())
   updatedAt      DateTime          @updatedAt
+}
+
+model PaymentProof {
+  id             String       @id
+  organizationId String
+  paymentId      String?
+  storageKey     String
+  proofUrl       String
+  originalName   String
+  mimeType       String
+  sizeBytes      Int
+  sha256         String
+  status         String       @default("uploaded")
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  payment        Payment?     @relation(fields: [paymentId], references: [id])
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@index([organizationId])
+  @@index([paymentId])
 }
 
 model ApprovalRequest {

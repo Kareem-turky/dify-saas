@@ -8,7 +8,7 @@
 
 - Landing/Pricing/Signup.
 - Organizations + plans + subscriptions.
-- Manual payments: InstaPay/Vodafone Cash/bank transfer proof upload metadata.
+- Manual payments: InstaPay/Vodafone Cash/bank transfer proof file upload + metadata.
 - Admin approvals.
 - Provisioning job framework لإنشاء Dify workspace لاحقًا بعد الموافقة.
 - صفحات أساسية للعميل والأدمن والتكاملات.
@@ -21,6 +21,39 @@ pnpm --filter @dify-saas/api test
 pnpm --filter @dify-saas/api start:dev
 pnpm --filter @dify-saas/web dev
 ```
+
+## Payment proof uploads
+
+تم إضافة endpoint آمن كبداية لرفع إثبات الدفع قبل إنشاء payment review:
+
+```text
+POST /payments/proofs
+Content-Type: multipart/form-data
+Fields:
+- organizationId
+- file: JPG/PNG/WEBP/PDF بحد أقصى 5MB
+```
+
+الـ API يخزن الملف محليًا في التطوير داخل `PAYMENT_PROOF_UPLOAD_DIR` ويرجع metadata:
+
+```json
+{
+  "id": "prf_xxxxxxxx",
+  "proofUrl": "/payment-proofs/org_xxxxxxxx/prf_xxxxxxxx.jpg",
+  "originalName": "receipt.jpg",
+  "mimeType": "image/jpeg",
+  "sizeBytes": 12345,
+  "sha256": "..."
+}
+```
+
+بعدها صفحة `/payment` ترسل `proofUploadId` إلى:
+
+```text
+POST /payments/manual-proof
+```
+
+لربط الملف بسجل الدفع وطلب مراجعة الأدمن.
 
 ## Dify provisioning configuration
 

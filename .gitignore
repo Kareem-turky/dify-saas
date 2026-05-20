@@ -10,3 +10,6 @@ coverage
 *.tsbuildinfo
 *.db
 *.db-journal
+uploads/
+apps/api/uploads/
+apps/api/tmp/

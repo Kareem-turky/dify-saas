@@ -1,7 +1,20 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { createHash } from 'crypto';
+import { mkdir, writeFile } from 'fs/promises';
+import path from 'path';
 import { PrismaService } from './prisma.service';
 
 const id = (prefix: string) => `${prefix}_${Math.random().toString(36).slice(2, 10)}`;
+const MAX_PAYMENT_PROOF_BYTES = 5 * 1024 * 1024;
+const ALLOWED_PAYMENT_PROOF_MIME_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'application/pdf']);
+
+function safeFileName(value: string) {
+  return value.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 120) || 'payment-proof';
+}
+
+function getPaymentProofUploadRoot() {
+  return process.env.PAYMENT_PROOF_UPLOAD_DIR || './uploads/payment-proofs';
+}
 
 function trimTrailingSlash(value: string) {
   return value.replace(/\/+$/, '');
@@ -59,26 +72,77 @@ export class SaasService {
     return { user, organization, subscription, nextStep: 'submit_manual_payment_or_card_payment' };
   }
 
-  async submitManualPayment(input: { organizationId: string; method: 'instapay' | 'vodafone_cash' | 'bank_transfer'; amountEgp: number; reference?: string; proofUrl?: string }) {
+  async submitManualPayment(input: { organizationId: string; method: 'instapay' | 'vodafone_cash' | 'bank_transfer'; amountEgp: number; reference?: string; proofUrl?: string; proofUploadId?: string }) {
     const organization = await this.db.organization.findUnique({ where: { id: input.organizationId } });
     if (!organization) throw new NotFoundException('Organization not found');
     const subscription = await this.db.subscription.findFirst({ where: { organizationId: organization.id } });
     if (!subscription) throw new NotFoundException('Subscription not found');
 
+    const uploadedProof = input.proofUploadId
+      ? await this.db.paymentProof.findUnique({ where: { id: input.proofUploadId } })
+      : null;
+    if (input.proofUploadId && !uploadedProof) throw new NotFoundException('Payment proof upload not found');
+    if (uploadedProof && uploadedProof.organizationId !== organization.id) throw new BadRequestException('Payment proof upload does not belong to this organization');
+    if (uploadedProof?.paymentId) throw new BadRequestException('Payment proof upload is already attached to a payment');
+
     const paymentId = id('pay');
     const approvalId = id('apr');
+    const proofUrl = uploadedProof?.proofUrl || input.proofUrl;
 
     const result = await this.db.$transaction(async tx => {
       const updatedOrganization = await tx.organization.update({ where: { id: organization.id }, data: { status: 'pending_approval' } });
       await tx.subscription.update({ where: { id: subscription.id }, data: { status: 'needs_review' } });
       const payment = await tx.payment.create({
-        data: { id: paymentId, organizationId: organization.id, subscriptionId: subscription.id, method: input.method, amountEgp: input.amountEgp, status: 'needs_review', reference: input.reference, proofUrl: input.proofUrl }
+        data: { id: paymentId, organizationId: organization.id, subscriptionId: subscription.id, method: input.method, amountEgp: input.amountEgp, status: 'needs_review', reference: input.reference, proofUrl }
       });
+      if (uploadedProof) {
+        await tx.paymentProof.update({ where: { id: uploadedProof.id }, data: { paymentId: payment.id, status: 'attached' } });
+      }
       const approval = await tx.approvalRequest.create({ data: { id: approvalId, organizationId: organization.id, paymentId: payment.id, status: 'open' } });
       return { payment, approval, organization: updatedOrganization };
     });
 
     return { ...result, nextStep: 'admin_review' };
+  }
+
+  async storePaymentProof(input: { organizationId: string; file?: { originalname?: string; mimetype?: string; size?: number; buffer?: Buffer } }) {
+    const organization = await this.db.organization.findUnique({ where: { id: input.organizationId } });
+    if (!organization) throw new NotFoundException('Organization not found');
+    const file = input.file;
+    if (!file?.buffer?.length) throw new BadRequestException('Payment proof file is required');
+    if (!file.mimetype || !ALLOWED_PAYMENT_PROOF_MIME_TYPES.has(file.mimetype)) {
+      throw new BadRequestException('Unsupported payment proof file type');
+    }
+    if ((file.size || file.buffer.length) > MAX_PAYMENT_PROOF_BYTES) {
+      throw new BadRequestException('Payment proof file is too large');
+    }
+
+    const proofId = id('prf');
+    const originalName = safeFileName(file.originalname || 'payment-proof');
+    const extension = path.extname(originalName);
+    const storedFileName = `${proofId}${extension}`;
+    const uploadRoot = getPaymentProofUploadRoot();
+    const relativeStorageKey = path.posix.join(input.organizationId, storedFileName);
+    const organizationDir = path.join(uploadRoot, input.organizationId);
+    await mkdir(organizationDir, { recursive: true });
+    await writeFile(path.join(organizationDir, storedFileName), file.buffer);
+
+    const sha256 = createHash('sha256').update(file.buffer).digest('hex');
+    const proofUrl = `/payment-proofs/${relativeStorageKey}`;
+
+    return this.db.paymentProof.create({
+      data: {
+        id: proofId,
+        organizationId: input.organizationId,
+        storageKey: relativeStorageKey,
+        proofUrl,
+        originalName,
+        mimeType: file.mimetype,
+        sizeBytes: file.size || file.buffer.length,
+        sha256,
+        status: 'uploaded'
+      }
+    });
   }
 
   async listApprovals() {

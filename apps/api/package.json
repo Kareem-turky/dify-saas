@@ -14,19 +14,21 @@
     "@nestjs/common": "^11.1.9",
     "@nestjs/core": "^11.1.9",
     "@nestjs/platform-express": "^11.1.9",
+    "@prisma/client": "^6.19.1",
+    "multer": "^2.1.1",
     "reflect-metadata": "^0.2.2",
-    "rxjs": "^7.8.2",
-    "@prisma/client": "^6.19.1"
+    "rxjs": "^7.8.2"
   },
   "devDependencies": {
     "@nestjs/testing": "^11.1.9",
     "@types/express": "^5.0.6",
+    "@types/multer": "^2.1.0",
     "@types/node": "^24.10.1",
     "@types/supertest": "^6.0.3",
+    "prisma": "^6.19.1",
     "supertest": "^7.1.4",
     "ts-node": "^10.9.2",
     "typescript": "^5.9.3",
-    "vitest": "^4.0.14",
-    "prisma": "^6.19.1"
+    "vitest": "^4.0.14"
   }
 }

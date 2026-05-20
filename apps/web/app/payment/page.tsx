@@ -21,6 +21,7 @@ export default function PaymentPage(){
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
   const [status, setStatus] = useState('');
   const [submittedPaymentId, setSubmittedPaymentId] = useState('');
+  const [uploadedProof, setUploadedProof] = useState<{ id: string; proofUrl: string; originalName: string } | null>(null);
 
   useEffect(() => { setOrganizationId(getInitialOrganizationId()); }, []);
 
@@ -46,12 +47,33 @@ export default function PaymentPage(){
     }
 
     const form = new FormData(event.currentTarget);
+    const proofFile = form.get('proofFile');
+    let proofUploadId = uploadedProof?.id || '';
+    let proofUrl = uploadedProof?.proofUrl || '';
+
+    if (proofFile instanceof File && proofFile.size > 0 && !proofUploadId) {
+      setStatus('جاري رفع ملف إثبات الدفع...');
+      const uploadForm = new FormData();
+      uploadForm.append('organizationId', organizationId);
+      uploadForm.append('file', proofFile);
+      const uploadResponse = await fetch(`${API_BASE}/payments/proofs`, { method: 'POST', body: uploadForm });
+      const uploadData = await uploadResponse.json();
+      if (!uploadResponse.ok) {
+        setStatus(uploadData.message || 'فشل رفع ملف إثبات الدفع');
+        return;
+      }
+      proofUploadId = uploadData.id;
+      proofUrl = uploadData.proofUrl;
+      setUploadedProof({ id: uploadData.id, proofUrl: uploadData.proofUrl, originalName: uploadData.originalName });
+    }
+
     const payload = {
       organizationId,
       method: String(form.get('method') || 'instapay') as 'instapay' | 'vodafone_cash' | 'bank_transfer',
       amountEgp: Number(form.get('amountEgp') || summary?.plan?.monthlyPriceEgp || 0),
       reference: String(form.get('reference') || ''),
-      proofUrl: String(form.get('proofUrl') || '')
+      proofUploadId: proofUploadId || undefined,
+      proofUrl: proofUrl || String(form.get('proofUrl') || '')
     };
 
     setStatus('جاري تسجيل إثبات الدفع...');
@@ -89,7 +111,13 @@ export default function PaymentPage(){
       </select>
       <input name="amountEgp" type="number" className="input" placeholder="المبلغ بالجنيه" defaultValue={summary?.plan?.monthlyPriceEgp || ''} required />
       <input name="reference" className="input" placeholder="رقم العملية / Reference" required />
-      <input name="proofUrl" className="input" placeholder="رابط صورة إثبات الدفع أو ملاحظة مؤقتة" />
+      <label className="item" style={{display: 'block'}}>
+        <strong>صورة/ملف إثبات الدفع</strong>
+        <input name="proofFile" type="file" className="input" accept="image/jpeg,image/png,image/webp,application/pdf" />
+        <small>الأنواع المسموحة: JPG, PNG, WEBP, PDF — حد أقصى 5MB.</small>
+      </label>
+      {uploadedProof && <p>تم رفع الملف: {uploadedProof.originalName}</p>}
+      <input name="proofUrl" className="input" placeholder="رابط إثبات دفع خارجي اختياري لو الملف مرفوع مسبقًا" />
       <button className="btn">إرسال إثبات الدفع</button>
     </form>
 
