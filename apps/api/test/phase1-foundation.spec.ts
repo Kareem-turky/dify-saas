@@ -1,16 +1,19 @@
 import 'reflect-metadata';
-import { Test } from '@nestjs/testing';
+import { Test, TestingModule } from '@nestjs/testing';
 import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { AppModule } from '../src/app.module';
+import { PrismaService } from '../src/prisma.service';
 
 describe('Phase 1 SaaS foundation', () => {
   let app: INestApplication;
+  let moduleRef: TestingModule;
 
   beforeEach(async () => {
-    const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
+    moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
     app = moduleRef.createNestApplication();
     await app.init();
+    await moduleRef.get(PrismaService).resetForTests();
   });
 
   afterEach(async () => { await app.close(); });
@@ -24,7 +27,7 @@ describe('Phase 1 SaaS foundation', () => {
   it('runs signup -> manual payment proof -> admin approval -> queued Dify provisioning job', async () => {
     const signup = await request(app.getHttpServer())
       .post('/auth/signup')
-      .send({ name: 'Kareem', email: 'kareem@example.com', phone: '+201000000000', companyName: 'Kareem Co', industry: 'ecommerce', preferredLanguage: 'ar', planId: 'starter' })
+      .send({ name: 'Kareem', email: `kareem-${Date.now()}@example.com`, phone: '+201000000000', companyName: 'Kareem Co', industry: 'ecommerce', preferredLanguage: 'ar', planId: 'starter' })
       .expect(201);
 
     expect(signup.body.organization.status).toBe('pending_payment');

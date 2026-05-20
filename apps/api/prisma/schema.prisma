@@ -1,0 +1,100 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id                String        @id
+  name              String
+  email             String        @unique
+  phone             String?
+  role              String
+  preferredLanguage String
+  organizationId    String?
+  organization      Organization? @relation(fields: [organizationId], references: [id])
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+}
+
+model Organization {
+  id            String             @id
+  name          String
+  ownerUserId   String
+  status        String
+  industry      String?
+  users         User[]
+  subscriptions Subscription[]
+  payments      Payment[]
+  approvals     ApprovalRequest[]
+  jobs          ProvisioningJob[]
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime           @updatedAt
+}
+
+model Plan {
+  id                     String         @id
+  name                   String
+  monthlyPriceEgp        Int
+  messageLimit           Int
+  channelLimit           Int
+  seatLimit              Int
+  requiresManualApproval Boolean
+  subscriptions          Subscription[]
+}
+
+model Subscription {
+  id             String       @id
+  organizationId String
+  planId         String
+  status         String
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  plan           Plan         @relation(fields: [planId], references: [id])
+  payments       Payment[]
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+}
+
+model Payment {
+  id             String            @id
+  organizationId String
+  subscriptionId String
+  method         String
+  amountEgp      Int
+  status         String
+  reference      String?
+  proofUrl       String?
+  organization   Organization      @relation(fields: [organizationId], references: [id])
+  subscription   Subscription      @relation(fields: [subscriptionId], references: [id])
+  approvals      ApprovalRequest[]
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+}
+
+model ApprovalRequest {
+  id             String       @id
+  organizationId String
+  paymentId      String
+  status         String
+  notes          String?
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  payment        Payment      @relation(fields: [paymentId], references: [id])
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+}
+
+model ProvisioningJob {
+  id             String       @id
+  organizationId String
+  type           String
+  status         String
+  attempts       Int          @default(0)
+  payload        Json
+  lastError      String?
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+}

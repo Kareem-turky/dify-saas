@@ -1,58 +1,103 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import { InMemoryStore } from './in-memory.store';
+import { PrismaService } from './prisma.service';
+
+const id = (prefix: string) => `${prefix}_${Math.random().toString(36).slice(2, 10)}`;
 
 @Injectable()
 export class SaasService {
-  constructor(private readonly store: InMemoryStore) {}
+  constructor(private readonly db: PrismaService) {}
 
-  listPlans() { return this.store.plans; }
+  listPlans() {
+    return this.db.plan.findMany({ orderBy: { monthlyPriceEgp: 'asc' } });
+  }
 
-  signup(input: { name: string; email: string; phone?: string; companyName: string; industry?: string; preferredLanguage?: 'ar' | 'en'; planId: string }) {
-    const plan = this.store.plans.find(p => p.id === input.planId);
+  async signup(input: { name: string; email: string; phone?: string; companyName: string; industry?: string; preferredLanguage?: 'ar' | 'en'; planId: string }) {
+    const plan = await this.db.plan.findUnique({ where: { id: input.planId } });
     if (!plan) throw new BadRequestException('Unknown plan');
-    if (this.store.users.some(u => u.email.toLowerCase() === input.email.toLowerCase())) throw new BadRequestException('Email already registered');
+    const existingUser = await this.db.user.findUnique({ where: { email: input.email.toLowerCase() } });
+    if (existingUser) throw new BadRequestException('Email already registered');
 
-    const userId = this.store.nextId('usr');
-    const organizationId = this.store.nextId('org');
-    const user = { id: userId, name: input.name, email: input.email, phone: input.phone, role: 'customer' as const, preferredLanguage: input.preferredLanguage ?? 'ar' as const, organizationId };
-    const organization = { id: organizationId, name: input.companyName, ownerUserId: user.id, status: 'pending_payment' as const, industry: input.industry };
-    const subscription = { id: this.store.nextId('sub'), organizationId: organization.id, planId: plan.id, status: 'pending_payment' as const };
+    const userId = id('usr');
+    const organizationId = id('org');
+    const subscriptionId = id('sub');
 
-    this.store.users.push(user); this.store.organizations.push(organization); this.store.subscriptions.push(subscription);
+    const { user, organization, subscription } = await this.db.$transaction(async tx => {
+      const organization = await tx.organization.create({
+        data: { id: organizationId, name: input.companyName, ownerUserId: userId, status: 'pending_payment', industry: input.industry }
+      });
+      const user = await tx.user.create({
+        data: { id: userId, name: input.name, email: input.email.toLowerCase(), phone: input.phone, role: 'customer', preferredLanguage: input.preferredLanguage ?? 'ar', organizationId }
+      });
+      const subscription = await tx.subscription.create({
+        data: { id: subscriptionId, organizationId, planId: plan.id, status: 'pending_payment' }
+      });
+      return { user, organization, subscription };
+    });
+
     return { user, organization, subscription, nextStep: 'submit_manual_payment_or_card_payment' };
   }
 
-  submitManualPayment(input: { organizationId: string; method: 'instapay' | 'vodafone_cash' | 'bank_transfer'; amountEgp: number; reference?: string; proofUrl?: string }) {
-    const organization = this.store.organizations.find(o => o.id === input.organizationId);
+  async submitManualPayment(input: { organizationId: string; method: 'instapay' | 'vodafone_cash' | 'bank_transfer'; amountEgp: number; reference?: string; proofUrl?: string }) {
+    const organization = await this.db.organization.findUnique({ where: { id: input.organizationId } });
     if (!organization) throw new NotFoundException('Organization not found');
-    const subscription = this.store.subscriptions.find(s => s.organizationId === organization.id);
+    const subscription = await this.db.subscription.findFirst({ where: { organizationId: organization.id } });
     if (!subscription) throw new NotFoundException('Subscription not found');
 
-    organization.status = 'pending_approval';
-    subscription.status = 'needs_review';
-    const payment = { id: this.store.nextId('pay'), organizationId: organization.id, subscriptionId: subscription.id, method: input.method, amountEgp: input.amountEgp, status: 'needs_review' as const, reference: input.reference, proofUrl: input.proofUrl };
-    const approval = { id: this.store.nextId('apr'), organizationId: organization.id, paymentId: payment.id, status: 'open' as const };
-    this.store.payments.push(payment); this.store.approvals.push(approval);
-    return { payment, approval, organization, nextStep: 'admin_review' };
+    const paymentId = id('pay');
+    const approvalId = id('apr');
+
+    const result = await this.db.$transaction(async tx => {
+      const updatedOrganization = await tx.organization.update({ where: { id: organization.id }, data: { status: 'pending_approval' } });
+      await tx.subscription.update({ where: { id: subscription.id }, data: { status: 'needs_review' } });
+      const payment = await tx.payment.create({
+        data: { id: paymentId, organizationId: organization.id, subscriptionId: subscription.id, method: input.method, amountEgp: input.amountEgp, status: 'needs_review', reference: input.reference, proofUrl: input.proofUrl }
+      });
+      const approval = await tx.approvalRequest.create({ data: { id: approvalId, organizationId: organization.id, paymentId: payment.id, status: 'open' } });
+      return { payment, approval, organization: updatedOrganization };
+    });
+
+    return { ...result, nextStep: 'admin_review' };
   }
 
-  listApprovals() {
-    return this.store.approvals.map(approval => ({ approval, payment: this.store.payments.find(p => p.id === approval.paymentId), organization: this.store.organizations.find(o => o.id === approval.organizationId) }));
+  async listApprovals() {
+    const approvals = await this.db.approvalRequest.findMany({
+      orderBy: { createdAt: 'desc' },
+      include: { payment: true, organization: true }
+    });
+    return approvals.map(({ payment, organization, ...approval }) => ({ approval, payment, organization }));
   }
 
-  approvePayment(paymentId: string, notes?: string) {
-    const payment = this.store.payments.find(p => p.id === paymentId);
+  async approvePayment(paymentId: string, notes?: string) {
+    const payment = await this.db.payment.findUnique({ where: { id: paymentId } });
     if (!payment) throw new NotFoundException('Payment not found');
-    const approval = this.store.approvals.find(a => a.paymentId === payment.id && a.status === 'open');
+    const approval = await this.db.approvalRequest.findFirst({ where: { paymentId: payment.id, status: 'open' } });
     if (!approval) throw new BadRequestException('No open approval request for this payment');
-    const organization = this.store.organizations.find(o => o.id === payment.organizationId)!;
-    const subscription = this.store.subscriptions.find(s => s.id === payment.subscriptionId)!;
+    const subscription = await this.db.subscription.findUnique({ where: { id: payment.subscriptionId } });
+    if (!subscription) throw new NotFoundException('Subscription not found');
+    const organization = await this.db.organization.findUnique({ where: { id: payment.organizationId } });
+    if (!organization) throw new NotFoundException('Organization not found');
 
-    payment.status = 'paid'; approval.status = 'approved'; approval.notes = notes; subscription.status = 'active'; organization.status = 'provisioning';
-    const job = { id: this.store.nextId('job'), organizationId: organization.id, type: 'create_dify_workspace' as const, status: 'queued' as const, attempts: 0, payload: { organizationName: organization.name, ownerUserId: organization.ownerUserId, subscriptionId: subscription.id } };
-    this.store.provisioningJobs.push(job);
-    return { payment, approval, subscription, organization, provisioningJob: job };
+    const jobId = id('job');
+    return this.db.$transaction(async tx => {
+      const paidPayment = await tx.payment.update({ where: { id: payment.id }, data: { status: 'paid' } });
+      const approvedRequest = await tx.approvalRequest.update({ where: { id: approval.id }, data: { status: 'approved', notes } });
+      const activeSubscription = await tx.subscription.update({ where: { id: subscription.id }, data: { status: 'active' } });
+      const provisioningOrganization = await tx.organization.update({ where: { id: organization.id }, data: { status: 'provisioning' } });
+      const provisioningJob = await tx.provisioningJob.create({
+        data: {
+          id: jobId,
+          organizationId: organization.id,
+          type: 'create_dify_workspace',
+          status: 'queued',
+          attempts: 0,
+          payload: { organizationName: organization.name, ownerUserId: organization.ownerUserId, subscriptionId: subscription.id }
+        }
+      });
+      return { payment: paidPayment, approval: approvedRequest, subscription: activeSubscription, organization: provisioningOrganization, provisioningJob };
+    });
   }
 
-  listProvisioningJobs() { return this.store.provisioningJobs; }
+  listProvisioningJobs() {
+    return this.db.provisioningJob.findMany({ orderBy: { createdAt: 'desc' } });
+  }
 }
