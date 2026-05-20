@@ -32,9 +32,23 @@ type DifyStatus = {
   requiresExistingDifyOwnerAccount: boolean;
 };
 
+type AuditLogRow = {
+  id: string;
+  actorUserId?: string | null;
+  organizationId?: string | null;
+  action: string;
+  targetType?: string | null;
+  targetId?: string | null;
+  metadata?: Record<string, unknown> | null;
+  createdAt: string;
+  actorUser?: { id: string; email: string; name: string } | null;
+  organization?: { id: string; name: string } | null;
+};
+
 export default function AdminPage(){
   const [rows, setRows] = useState<ApprovalRow[]>([]);
   const [jobs, setJobs] = useState<ProvisioningJobRow[]>([]);
+  const [auditLogs, setAuditLogs] = useState<AuditLogRow[]>([]);
   const [difyStatus, setDifyStatus] = useState<DifyStatus | null>(null);
   const [message, setMessage] = useState('');
   const [adminEmail, setAdminEmail] = useState('');
@@ -59,6 +73,12 @@ export default function AdminPage(){
     setDifyStatus(await response.json());
   }
 
+  async function loadAuditLogs(){
+    const response = await fetch(`${API_BASE}/admin/audit-logs`, { headers: { Authorization: `Bearer ${adminToken}` } });
+    if (!response.ok) throw new Error('تعذر تحميل audit logs.');
+    setAuditLogs(await response.json());
+  }
+
   async function refreshAll(){
     if (!adminToken) {
       setMessage('سجل دخول الأدمن الأول.');
@@ -66,7 +86,7 @@ export default function AdminPage(){
     }
     setMessage('جاري تحميل لوحة الأدمن...');
     try {
-      await Promise.all([loadApprovals(), loadJobs(), loadDifyStatus()]);
+      await Promise.all([loadApprovals(), loadJobs(), loadDifyStatus(), loadAuditLogs()]);
       setMessage('');
     } catch (error) {
       setMessage(error instanceof Error ? error.message : 'حصل خطأ أثناء تحميل لوحة الأدمن');
@@ -203,6 +223,16 @@ export default function AdminPage(){
         {job.nextRunAt && <p>Next retry: {new Date(job.nextRunAt).toLocaleString()}</p>}
         {job.lastError && <p>Last error: {job.lastError}</p>}
         {(job.status === 'queued' || job.status === 'failed') && <button className="btn" onClick={() => runJob(job.id)}>{job.status === 'failed' ? 'Retry job' : 'Run job'}</button>}
+      </div>)}
+    </section>
+
+    <section style={{marginTop: 32}}>
+      <h2>Audit logs</h2>
+      {auditLogs.length === 0 && <p>لا توجد audit logs حتى الآن.</p>}
+      {auditLogs.slice(0, 20).map(log => <div className="item" key={log.id} style={{marginBottom: 12}}>
+        <strong>{log.action}</strong>
+        <p>{new Date(log.createdAt).toLocaleString()} · Actor: {log.actorUser?.email || log.actorUserId || 'system'} · Org: {log.organization?.name || log.organizationId || 'n/a'}</p>
+        <p>Target: {log.targetType || 'n/a'} · {log.targetId || 'n/a'}</p>
       </div>)}
     </section>
   </main>

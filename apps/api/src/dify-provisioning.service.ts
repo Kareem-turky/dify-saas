@@ -140,7 +140,7 @@ export class DifyProvisioningGateway {
 export class DifyProvisioningService {
   constructor(private readonly db: PrismaService, private readonly gateway: DifyProvisioningGateway) {}
 
-  async runJob(jobId: string) {
+  async runJob(jobId: string, actorUserId?: string) {
     const job = await this.db.provisioningJob.findUnique({ where: { id: jobId }, include: { organization: true } });
     if (!job) throw new NotFoundException('Provisioning job not found');
     if (job.type !== 'create_dify_workspace') throw new BadRequestException('Unsupported provisioning job type');
@@ -174,6 +174,17 @@ export class DifyProvisioningService {
             payload: { ...(job.payload as Record<string, unknown>), difyTenantId: result.tenantId, difyAccountId: result.accountId }
           }
         });
+        await tx.auditLog.create({
+          data: {
+            id: `aud_${Math.random().toString(36).slice(2, 10)}`,
+            actorUserId,
+            organizationId: organization.id,
+            action: 'provisioning_job_completed',
+            targetType: 'provisioning_job',
+            targetId: completedJob.id,
+            metadata: { tenantId: result.tenantId, accountId: result.accountId }
+          }
+        });
         return { job: completedJob, organization };
       });
     } catch (error) {
@@ -187,11 +198,22 @@ export class DifyProvisioningService {
           nextRunAt: exhausted ? null : nextBackoffRunAt(runningJob.attempts)
         }
       });
+      await this.db.auditLog.create({
+        data: {
+          id: `aud_${Math.random().toString(36).slice(2, 10)}`,
+          actorUserId,
+          organizationId: job.organization.id,
+          action: exhausted ? 'provisioning_job_dead' : 'provisioning_job_failed',
+          targetType: 'provisioning_job',
+          targetId: failedJob.id,
+          metadata: { error: message, attempts: failedJob.attempts, maxAttempts: failedJob.maxAttempts }
+        }
+      });
       throw new BadRequestException({ message: 'Dify provisioning failed', job: failedJob });
     }
   }
 
-  async runDueJobs(limit = 10) {
+  async runDueJobs(limit = 10, actorUserId?: string) {
     const jobs = await this.db.provisioningJob.findMany({
       where: dueJobWhere(new Date()),
       orderBy: { createdAt: 'asc' },
@@ -201,7 +223,7 @@ export class DifyProvisioningService {
     const results: Array<{ jobId: string; status: 'completed' | 'failed'; error?: string }> = [];
     for (const job of jobs) {
       try {
-        const result = await this.runJob(job.id);
+        const result = await this.runJob(job.id, actorUserId);
         results.push({ jobId: result.job.id, status: 'completed' });
       } catch (error) {
         const response = error instanceof BadRequestException ? error.getResponse() : undefined;

@@ -213,3 +213,34 @@ lastError
 - بعد الوصول إلى `maxAttempts` يتحول job إلى `dead` ولا يدخل في batch runner تلقائيًا.
 
 صفحة `/admin` تعرض الآن عدد المحاولات، آخر خطأ، وميعاد retry التالي عند وجوده.
+
+## Audit logs
+
+تم إضافة سجل audit للأحداث الحساسة في المنصة:
+
+```text
+GET /admin/audit-logs
+Authorization: Bearer <admin-token>
+```
+
+الأحداث المسجلة حاليًا:
+
+- `admin_login`
+- `payment_approved`
+- `provisioning_job_completed`
+- `provisioning_job_failed`
+- `provisioning_job_dead`
+
+كل log يحتوي على:
+
+```text
+action
+actorUserId
+organizationId
+targetType
+targetId
+metadata
+createdAt
+```
+
+مهم: audit metadata لا تخزن passwords أو secrets. صفحة `/admin` تعرض آخر audit logs لمساعدة الدعم والتشغيل.

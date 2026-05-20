@@ -19,6 +19,7 @@ model User {
   organization      Organization? @relation(fields: [organizationId], references: [id])
   createdAt         DateTime      @default(now())
   updatedAt         DateTime      @updatedAt
+  auditLogs         AuditLog[]
 }
 
 model Organization {
@@ -35,6 +36,7 @@ model Organization {
   paymentProofs PaymentProof[]
   approvals     ApprovalRequest[]
   jobs          ProvisioningJob[]
+  auditLogs     AuditLog[]
   createdAt     DateTime           @default(now())
   updatedAt     DateTime           @updatedAt
 }
@@ -126,4 +128,22 @@ model ProvisioningJob {
   updatedAt      DateTime     @updatedAt
 
   @@index([status, nextRunAt])
+}
+
+model AuditLog {
+  id             String        @id
+  actorUserId    String?
+  organizationId String?
+  action         String
+  targetType     String?
+  targetId       String?
+  metadata       Json?
+  actorUser      User?         @relation(fields: [actorUserId], references: [id])
+  organization   Organization? @relation(fields: [organizationId], references: [id])
+  createdAt      DateTime      @default(now())
+
+  @@index([actorUserId])
+  @@index([organizationId])
+  @@index([action])
+  @@index([createdAt])
 }

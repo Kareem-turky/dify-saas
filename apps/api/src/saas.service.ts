@@ -2,6 +2,7 @@ import { BadRequestException, ForbiddenException, Injectable, NotFoundException,
 import { createHash, createHmac, timingSafeEqual } from 'crypto';
 import { mkdir, writeFile } from 'fs/promises';
 import path from 'path';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from './prisma.service';
 
 const id = (prefix: string) => `${prefix}_${Math.random().toString(36).slice(2, 10)}`;
@@ -116,6 +117,9 @@ export class SaasService {
   async login(input: { email: string; password: string }) {
     const user = await this.db.user.findUnique({ where: { email: input.email.toLowerCase() } });
     if (!user || !verifyPassword(input.password, user.passwordHash)) throw new UnauthorizedException('Invalid email or password');
+    if (user.role === 'admin') {
+      await this.recordAuditLog({ actorUserId: user.id, action: 'admin_login', targetType: 'user', targetId: user.id, metadata: { email: user.email } });
+    }
     return { token: createToken(user.id), user: publicUser(user) };
   }
 
@@ -222,7 +226,7 @@ export class SaasService {
     return approvals.map(({ payment, organization, ...approval }) => ({ approval, payment, organization }));
   }
 
-  async approvePayment(paymentId: string, notes?: string) {
+  async approvePayment(paymentId: string, notes?: string, actorUserId?: string) {
     const payment = await this.db.payment.findUnique({ where: { id: paymentId } });
     if (!payment) throw new NotFoundException('Payment not found');
     const approval = await this.db.approvalRequest.findFirst({ where: { paymentId: payment.id, status: 'open' } });
@@ -248,12 +252,41 @@ export class SaasService {
           payload: { organizationName: organization.name, ownerUserId: organization.ownerUserId, subscriptionId: subscription.id }
         }
       });
+      await tx.auditLog.create({
+        data: {
+          id: id('aud'),
+          actorUserId,
+          organizationId: organization.id,
+          action: 'payment_approved',
+          targetType: 'payment',
+          targetId: payment.id,
+          metadata: { approvalId: approval.id, provisioningJobId: jobId, notes: notes || null }
+        }
+      });
       return { payment: paidPayment, approval: approvedRequest, subscription: activeSubscription, organization: provisioningOrganization, provisioningJob };
     });
   }
 
   listProvisioningJobs() {
     return this.db.provisioningJob.findMany({ orderBy: { createdAt: 'desc' }, include: { organization: true } });
+  }
+
+  listAuditLogs() {
+    return this.db.auditLog.findMany({ orderBy: { createdAt: 'desc' }, take: 100, include: { actorUser: true, organization: true } });
+  }
+
+  recordAuditLog(input: { actorUserId?: string; organizationId?: string; action: string; targetType?: string; targetId?: string; metadata?: Prisma.InputJsonObject }) {
+    return this.db.auditLog.create({
+      data: {
+        id: id('aud'),
+        actorUserId: input.actorUserId,
+        organizationId: input.organizationId,
+        action: input.action,
+        targetType: input.targetType,
+        targetId: input.targetId,
+        metadata: input.metadata
+      }
+    });
   }
 
   async getOrganizationDashboard(organizationId: string) {
