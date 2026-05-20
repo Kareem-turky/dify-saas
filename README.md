@@ -192,3 +192,24 @@ Authorization: Bearer <admin-token>
 ```
 
 لو job فشل، الـ runner يكمل باقي jobs ويسجل الفشل في `results` ويفضل `lastError` محفوظًا على job. صفحة `/admin` فيها زر `Run all ready jobs` لتشغيل كل queued/failed jobs الجاهزة.
+
+## Provisioning retry/backoff policy
+
+الـ provisioning jobs أصبحت تحتفظ بمعلومات تشغيل أوضح:
+
+```text
+attempts
+maxAttempts = 3
+nextRunAt
+lastError
+```
+
+عند فشل job:
+
+- يتحول إلى `failed`.
+- يتم حفظ `lastError`.
+- يتم تحديد `nextRunAt` بزيادة تدريجية قبل إعادة المحاولة.
+- `run-due` لا يعيد تشغيل failed job قبل ميعاد `nextRunAt`.
+- بعد الوصول إلى `maxAttempts` يتحول job إلى `dead` ولا يدخل في batch runner تلقائيًا.
+
+صفحة `/admin` تعرض الآن عدد المحاولات، آخر خطأ، وميعاد retry التالي عند وجوده.

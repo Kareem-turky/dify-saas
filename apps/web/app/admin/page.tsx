@@ -14,8 +14,10 @@ type ProvisioningJobRow = {
   id: string;
   organizationId: string;
   type: string;
-  status: 'queued' | 'running' | 'completed' | 'failed';
+  status: 'queued' | 'running' | 'completed' | 'failed' | 'dead';
   attempts: number;
+  maxAttempts?: number;
+  nextRunAt?: string | null;
   lastError?: string | null;
   payload?: Record<string, unknown>;
   organization?: { id: string; name: string; status: string; difyTenantId?: string | null; difyAccountId?: string | null };
@@ -196,8 +198,9 @@ export default function AdminPage(){
       {jobs.length === 0 && <p>لا توجد provisioning jobs حتى الآن.</p>}
       {jobs.map(job => <div className="item" key={job.id} style={{marginBottom: 12}}>
         <strong>{job.organization?.name || job.organizationId}</strong>
-        <p>Status: {job.status} · Type: {job.type} · Attempts: {job.attempts}</p>
+        <p>Status: {job.status} · Type: {job.type} · Attempts: {job.attempts}/{job.maxAttempts || 3}</p>
         <p>Organization: {job.organization?.status || 'unknown'} · Tenant: {job.organization?.difyTenantId || 'not mapped yet'}</p>
+        {job.nextRunAt && <p>Next retry: {new Date(job.nextRunAt).toLocaleString()}</p>}
         {job.lastError && <p>Last error: {job.lastError}</p>}
         {(job.status === 'queued' || job.status === 'failed') && <button className="btn" onClick={() => runJob(job.id)}>{job.status === 'failed' ? 'Retry job' : 'Run job'}</button>}
       </div>)}

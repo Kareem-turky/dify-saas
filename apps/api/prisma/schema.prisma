@@ -117,9 +117,13 @@ model ProvisioningJob {
   type           String
   status         String
   attempts       Int          @default(0)
+  maxAttempts    Int          @default(3)
+  nextRunAt      DateTime?
   payload        Json
   lastError      String?
   organization   Organization @relation(fields: [organizationId], references: [id])
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
+
+  @@index([status, nextRunAt])
 }

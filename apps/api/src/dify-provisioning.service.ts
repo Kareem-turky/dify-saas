@@ -1,4 +1,5 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from './prisma.service';
 
 export type DifyWorkspaceMode = 'dry-run' | 'live';
@@ -47,6 +48,18 @@ function readDifyProvisioningConfig(env: NodeJS.ProcessEnv = process.env): DifyP
   }
 
   return config;
+}
+
+function nextBackoffRunAt(attempts: number) {
+  const delayMinutes = Math.min(60, 2 ** Math.max(0, attempts - 1));
+  return new Date(Date.now() + delayMinutes * 60 * 1000);
+}
+
+function dueJobWhere(now: Date): Prisma.ProvisioningJobWhereInput {
+  return {
+    status: { in: ['queued', 'failed'] },
+    OR: [{ nextRunAt: null }, { nextRunAt: { lte: now } }]
+  };
 }
 
 @Injectable()
@@ -157,6 +170,7 @@ export class DifyProvisioningService {
           where: { id: job.id },
           data: {
             status: 'completed',
+            nextRunAt: null,
             payload: { ...(job.payload as Record<string, unknown>), difyTenantId: result.tenantId, difyAccountId: result.accountId }
           }
         });
@@ -164,14 +178,22 @@ export class DifyProvisioningService {
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown provisioning error';
-      const failedJob = await this.db.provisioningJob.update({ where: { id: runningJob.id }, data: { status: 'failed', lastError: message } });
+      const exhausted = runningJob.attempts >= runningJob.maxAttempts;
+      const failedJob = await this.db.provisioningJob.update({
+        where: { id: runningJob.id },
+        data: {
+          status: exhausted ? 'dead' : 'failed',
+          lastError: message,
+          nextRunAt: exhausted ? null : nextBackoffRunAt(runningJob.attempts)
+        }
+      });
       throw new BadRequestException({ message: 'Dify provisioning failed', job: failedJob });
     }
   }
 
   async runDueJobs(limit = 10) {
     const jobs = await this.db.provisioningJob.findMany({
-      where: { status: { in: ['queued', 'failed'] } },
+      where: dueJobWhere(new Date()),
       orderBy: { createdAt: 'asc' },
       take: limit
     });
