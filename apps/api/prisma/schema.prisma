@@ -26,6 +26,8 @@ model Organization {
   ownerUserId   String
   status        String
   industry      String?
+  difyTenantId  String?
+  difyAccountId String?
   users         User[]
   subscriptions Subscription[]
   payments      Payment[]

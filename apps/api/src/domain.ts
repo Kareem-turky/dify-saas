@@ -5,7 +5,7 @@ export type PaymentStatus = 'pending' | 'needs_review' | 'paid' | 'failed' | 're
 export type ProvisioningJobStatus = 'queued' | 'running' | 'completed' | 'failed';
 
 export interface User { id: string; name: string; email: string; phone?: string; role: UserRole; preferredLanguage: 'ar' | 'en'; organizationId?: string; }
-export interface Organization { id: string; name: string; ownerUserId: string; status: OrganizationStatus; industry?: string; }
+export interface Organization { id: string; name: string; ownerUserId: string; status: OrganizationStatus; industry?: string; difyTenantId?: string; difyAccountId?: string; }
 export interface Plan { id: string; name: string; monthlyPriceEgp: number; messageLimit: number; channelLimit: number; seatLimit: number; requiresManualApproval: boolean; }
 export interface Subscription { id: string; organizationId: string; planId: string; status: SubscriptionStatus; }
 export interface Payment { id: string; organizationId: string; subscriptionId: string; method: 'instapay' | 'vodafone_cash' | 'bank_transfer' | 'card'; amountEgp: number; status: PaymentStatus; reference?: string; proofUrl?: string; }

@@ -1,9 +1,10 @@
 import { Body, Controller, Get, Param, Post } from '@nestjs/common';
+import { DifyProvisioningService } from './dify-provisioning.service';
 import { SaasService } from './saas.service';
 
 @Controller()
 export class SaasController {
-  constructor(private readonly saas: SaasService) {}
+  constructor(private readonly saas: SaasService, private readonly provisioning: DifyProvisioningService) {}
 
   @Get('health') health() { return { ok: true, service: 'dify-saas-api' }; }
   @Get('plans') listPlans() { return this.saas.listPlans(); }
@@ -12,4 +13,5 @@ export class SaasController {
   @Get('admin/approvals') listApprovals() { return this.saas.listApprovals(); }
   @Post('admin/approvals/:paymentId/approve') approve(@Param('paymentId') paymentId: string, @Body() body: { notes?: string }) { return this.saas.approvePayment(paymentId, body?.notes); }
   @Get('provisioning/jobs') jobs() { return this.saas.listProvisioningJobs(); }
+  @Post('provisioning/jobs/:jobId/run') runProvisioningJob(@Param('jobId') jobId: string) { return this.provisioning.runJob(jobId); }
 }
