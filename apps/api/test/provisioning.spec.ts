@@ -4,16 +4,19 @@ import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { AppModule } from '../src/app.module';
 import { PrismaService } from '../src/prisma.service';
+import { seedAndLoginAdmin } from './auth-helpers';
 
 describe('Dify provisioning worker', () => {
   let app: INestApplication;
   let moduleRef: TestingModule;
+  let adminToken: string;
 
   beforeEach(async () => {
     moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
     app = moduleRef.createNestApplication();
     await app.init();
     await moduleRef.get(PrismaService).resetForTests();
+    adminToken = await seedAndLoginAdmin(app, moduleRef);
   });
 
   afterEach(async () => { await app.close(); });
@@ -31,6 +34,7 @@ describe('Dify provisioning worker', () => {
 
     return request(app.getHttpServer())
       .post(`/admin/approvals/${paymentProof.body.payment.id}/approve`)
+      .set('Authorization', adminToken)
       .send({ notes: 'Payment verified' })
       .expect(201);
   }
@@ -41,6 +45,7 @@ describe('Dify provisioning worker', () => {
 
     const run = await request(app.getHttpServer())
       .post(`/provisioning/jobs/${jobId}/run`)
+      .set('Authorization', adminToken)
       .expect(201);
 
     expect(run.body.job).toMatchObject({ id: jobId, status: 'completed', attempts: 1 });
@@ -48,7 +53,7 @@ describe('Dify provisioning worker', () => {
     expect(run.body.organization.difyTenantId).toMatch(/^dry_tenant_/);
     expect(run.body.organization.difyAccountId).toMatch(/^dry_account_/);
 
-    const jobs = await request(app.getHttpServer()).get('/provisioning/jobs').expect(200);
+    const jobs = await request(app.getHttpServer()).get('/provisioning/jobs').set('Authorization', adminToken).expect(200);
     expect(jobs.body[0]).toMatchObject({ id: jobId, status: 'completed', attempts: 1 });
   });
 });

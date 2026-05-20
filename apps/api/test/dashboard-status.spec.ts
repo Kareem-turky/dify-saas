@@ -4,16 +4,19 @@ import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { AppModule } from '../src/app.module';
 import { PrismaService } from '../src/prisma.service';
+import { seedAndLoginAdmin } from './auth-helpers';
 
 describe('customer dashboard organization status', () => {
   let app: INestApplication;
   let moduleRef: TestingModule;
+  let adminToken: string;
 
   beforeEach(async () => {
     moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
     app = moduleRef.createNestApplication();
     await app.init();
     await moduleRef.get(PrismaService).resetForTests();
+    adminToken = await seedAndLoginAdmin(app, moduleRef);
   });
 
   afterEach(async () => { await app.close(); });
@@ -41,10 +44,11 @@ describe('customer dashboard organization status', () => {
 
     const approval = await request(app.getHttpServer())
       .post(`/admin/approvals/${paymentProof.body.payment.id}/approve`)
+      .set('Authorization', adminToken)
       .send({ notes: 'Payment verified' })
       .expect(201);
 
-    await request(app.getHttpServer()).post(`/provisioning/jobs/${approval.body.provisioningJob.id}/run`).expect(201);
+    await request(app.getHttpServer()).post(`/provisioning/jobs/${approval.body.provisioningJob.id}/run`).set('Authorization', adminToken).expect(201);
 
     const active = await request(app.getHttpServer())
       .get(`/organizations/${signup.body.organization.id}/dashboard`)

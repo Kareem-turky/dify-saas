@@ -1,4 +1,4 @@
-export type UserRole = 'customer' | 'admin';
+export type UserRole = 'customer' | 'admin' | 'support';
 export type OrganizationStatus = 'pending_payment' | 'pending_approval' | 'provisioning' | 'active' | 'suspended';
 export type SubscriptionStatus = 'pending_payment' | 'needs_review' | 'active' | 'cancelled';
 export type PaymentStatus = 'pending' | 'needs_review' | 'paid' | 'failed' | 'refunded';

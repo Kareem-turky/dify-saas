@@ -1,4 +1,5 @@
 import { Injectable, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
+import { createHash } from 'crypto';
 import { PrismaClient } from '@prisma/client';
 
 @Injectable()
@@ -6,6 +7,7 @@ export class PrismaService extends PrismaClient implements OnModuleInit, OnModul
   async onModuleInit() {
     await this.$connect();
     await this.seedPlans();
+    await this.seedAdminFromEnv();
   }
 
   async onModuleDestroy() {
@@ -22,6 +24,25 @@ export class PrismaService extends PrismaClient implements OnModuleInit, OnModul
     for (const plan of plans) {
       await this.plan.upsert({ where: { id: plan.id }, update: plan, create: plan });
     }
+  }
+
+  hashPasswordForSeed(password: string) {
+    return `sha256:${createHash('sha256').update(password).digest('hex')}`;
+  }
+
+  async seedAdminFromEnv() {
+    const email = process.env.ADMIN_EMAIL?.toLowerCase();
+    const password = process.env.ADMIN_PASSWORD;
+    if (!email || !password) return;
+    await this.user.upsert({
+      where: { email },
+      update: { role: 'admin', passwordHash: this.hashPasswordForSeed(password), preferredLanguage: 'ar' },
+      create: { id: 'usr_admin', name: 'Platform Admin', email, role: 'admin', passwordHash: this.hashPasswordForSeed(password), preferredLanguage: 'ar' }
+    });
+  }
+
+  async seedAdminForTests() {
+    await this.seedAdminFromEnv();
   }
 
   async resetForTests() {

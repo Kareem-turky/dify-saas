@@ -22,6 +22,31 @@ pnpm --filter @dify-saas/api start:dev
 pnpm --filter @dify-saas/web dev
 ```
 
+## Authentication & RBAC
+
+الـ API يدعم الآن login مبدئي بتوكن Bearer محلي:
+
+```text
+POST /auth/login
+GET /auth/me
+```
+
+صفحة `/signup` تحفظ password hash للعميل، وصفحة `/admin` تطلب تسجيل دخول أدمن قبل تحميل طلبات الموافقة أو تشغيل provisioning jobs.
+
+لإنشاء أول أدمن في بيئة التطوير/التشغيل اضبط:
+
+```bash
+ADMIN_EMAIL=admin@example.com
+ADMIN_PASSWORD=change-this-password
+AUTH_TOKEN_SECRET=change-this-local-secret
+```
+
+عند تشغيل الـ API يتم عمل upsert للأدمن من القيم دي. Endpoints الأدمن والـ provisioning التشغيلية محمية الآن وتتطلب:
+
+```text
+Authorization: Bearer <token>
+```
+
 ## Payment proof uploads
 
 تم إضافة endpoint آمن كبداية لرفع إثبات الدفع قبل إنشاء payment review:

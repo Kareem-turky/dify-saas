@@ -1,5 +1,5 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import { createHash } from 'crypto';
+import { BadRequestException, ForbiddenException, Injectable, NotFoundException, UnauthorizedException } from '@nestjs/common';
+import { createHash, createHmac, timingSafeEqual } from 'crypto';
 import { mkdir, writeFile } from 'fs/promises';
 import path from 'path';
 import { PrismaService } from './prisma.service';
@@ -16,8 +16,48 @@ function getPaymentProofUploadRoot() {
   return process.env.PAYMENT_PROOF_UPLOAD_DIR || './uploads/payment-proofs';
 }
 
+function hashPassword(password?: string) {
+  if (!password) return null;
+  return `sha256:${createHash('sha256').update(password).digest('hex')}`;
+}
+
+function verifyPassword(password: string, storedHash?: string | null) {
+  const incoming = hashPassword(password);
+  if (!incoming || !storedHash) return false;
+  const a = Buffer.from(incoming);
+  const b = Buffer.from(storedHash);
+  return a.length === b.length && timingSafeEqual(a, b);
+}
+
+function authSecret() {
+  return process.env.AUTH_TOKEN_SECRET || process.env.ADMIN_PASSWORD || 'local-dev-auth-secret';
+}
+
+function encodeTokenPayload(payload: Record<string, unknown>) {
+  return Buffer.from(JSON.stringify(payload)).toString('base64url');
+}
+
+function signTokenPayload(payload: string) {
+  return createHmac('sha256', authSecret()).update(payload).digest('base64url');
+}
+
+function createToken(userId: string) {
+  const payload = encodeTokenPayload({ sub: userId, iat: Date.now() });
+  return `hst_${payload}.${signTokenPayload(payload)}`;
+}
+
+function parseBearerToken(authorization?: string) {
+  const match = authorization?.match(/^Bearer\s+(.+)$/i);
+  return match?.[1];
+}
+
 function trimTrailingSlash(value: string) {
   return value.replace(/\/+$/, '');
+}
+
+function publicUser<T extends { passwordHash?: string | null }>(user: T) {
+  const { passwordHash: _passwordHash, ...safeUser } = user;
+  return safeUser;
 }
 
 function buildAiStudioUrl(organization: { id: string; status: string; difyTenantId?: string | null; difyAccountId?: string | null }) {
@@ -46,7 +86,7 @@ export class SaasService {
     return this.db.plan.findMany({ orderBy: { monthlyPriceEgp: 'asc' } });
   }
 
-  async signup(input: { name: string; email: string; phone?: string; companyName: string; industry?: string; preferredLanguage?: 'ar' | 'en'; planId: string }) {
+  async signup(input: { name: string; email: string; password?: string; phone?: string; companyName: string; industry?: string; preferredLanguage?: 'ar' | 'en'; planId: string }) {
     const plan = await this.db.plan.findUnique({ where: { id: input.planId } });
     if (!plan) throw new BadRequestException('Unknown plan');
     const existingUser = await this.db.user.findUnique({ where: { email: input.email.toLowerCase() } });
@@ -55,13 +95,14 @@ export class SaasService {
     const userId = id('usr');
     const organizationId = id('org');
     const subscriptionId = id('sub');
+    const passwordHash = hashPassword(input.password);
 
     const { user, organization, subscription } = await this.db.$transaction(async tx => {
       const organization = await tx.organization.create({
         data: { id: organizationId, name: input.companyName, ownerUserId: userId, status: 'pending_payment', industry: input.industry }
       });
       const user = await tx.user.create({
-        data: { id: userId, name: input.name, email: input.email.toLowerCase(), phone: input.phone, role: 'customer', preferredLanguage: input.preferredLanguage ?? 'ar', organizationId }
+        data: { id: userId, name: input.name, email: input.email.toLowerCase(), phone: input.phone, role: 'customer', passwordHash, preferredLanguage: input.preferredLanguage ?? 'ar', organizationId }
       });
       const subscription = await tx.subscription.create({
         data: { id: subscriptionId, organizationId, planId: plan.id, status: 'pending_payment' }
@@ -69,7 +110,35 @@ export class SaasService {
       return { user, organization, subscription };
     });
 
-    return { user, organization, subscription, nextStep: 'submit_manual_payment_or_card_payment' };
+    return { user: publicUser(user), organization, subscription, nextStep: 'submit_manual_payment_or_card_payment' };
+  }
+
+  async login(input: { email: string; password: string }) {
+    const user = await this.db.user.findUnique({ where: { email: input.email.toLowerCase() } });
+    if (!user || !verifyPassword(input.password, user.passwordHash)) throw new UnauthorizedException('Invalid email or password');
+    return { token: createToken(user.id), user: publicUser(user) };
+  }
+
+  async currentUser(authorization?: string) {
+    return publicUser(await this.requireUser(authorization));
+  }
+
+  async requireUser(authorization?: string) {
+    const token = parseBearerToken(authorization);
+    if (!token?.startsWith('hst_')) throw new UnauthorizedException('Bearer token is required');
+    const [payload, signature] = token.slice(4).split('.');
+    if (!payload || !signature || signTokenPayload(payload) !== signature) throw new UnauthorizedException('Invalid bearer token');
+    const decoded = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8')) as { sub?: string };
+    if (!decoded.sub) throw new UnauthorizedException('Invalid bearer token');
+    const user = await this.db.user.findUnique({ where: { id: decoded.sub } });
+    if (!user) throw new UnauthorizedException('User not found');
+    return user;
+  }
+
+  async requireAdmin(authorization?: string) {
+    const user = await this.requireUser(authorization);
+    if (user.role !== 'admin') throw new ForbiddenException('Admin role is required');
+    return user;
   }
 
   async submitManualPayment(input: { organizationId: string; method: 'instapay' | 'vodafone_cash' | 'bank_transfer'; amountEgp: number; reference?: string; proofUrl?: string; proofUploadId?: string }) {

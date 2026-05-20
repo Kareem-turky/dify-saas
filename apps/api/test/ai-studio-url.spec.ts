@@ -4,6 +4,7 @@ import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { AppModule } from '../src/app.module';
 import { PrismaService } from '../src/prisma.service';
+import { seedAndLoginAdmin } from './auth-helpers';
 
 function withEnv(env: Record<string, string | undefined>, fn: () => void | Promise<void>) {
   const previous = {
@@ -27,6 +28,7 @@ function withEnv(env: Record<string, string | undefined>, fn: () => void | Promi
 describe('AI Studio URL builder', () => {
   let app: INestApplication;
   let moduleRef: TestingModule;
+  let adminToken: string;
 
   afterEach(async () => {
     if (app) await app.close();
@@ -37,6 +39,7 @@ describe('AI Studio URL builder', () => {
     app = moduleRef.createNestApplication();
     await app.init();
     await moduleRef.get(PrismaService).resetForTests();
+    adminToken = await seedAndLoginAdmin(app, moduleRef);
   }
 
   it('builds the customer dashboard AI Studio link from DIFY_WORKSPACE_URL_TEMPLATE', async () => {
@@ -55,10 +58,11 @@ describe('AI Studio URL builder', () => {
 
       const approval = await request(app.getHttpServer())
         .post(`/admin/approvals/${paymentProof.body.payment.id}/approve`)
+        .set('Authorization', adminToken)
         .send({ notes: 'Payment verified' })
         .expect(201);
 
-      await request(app.getHttpServer()).post(`/provisioning/jobs/${approval.body.provisioningJob.id}/run`).expect(201);
+      await request(app.getHttpServer()).post(`/provisioning/jobs/${approval.body.provisioningJob.id}/run`).set('Authorization', adminToken).expect(201);
 
       const dashboard = await request(app.getHttpServer())
         .get(`/organizations/${signup.body.organization.id}/dashboard`)

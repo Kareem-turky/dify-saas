@@ -35,15 +35,18 @@ export default function AdminPage(){
   const [jobs, setJobs] = useState<ProvisioningJobRow[]>([]);
   const [difyStatus, setDifyStatus] = useState<DifyStatus | null>(null);
   const [message, setMessage] = useState('');
+  const [adminEmail, setAdminEmail] = useState('');
+  const [adminPassword, setAdminPassword] = useState('');
+  const [adminToken, setAdminToken] = useState('');
 
   async function loadApprovals(){
-    const response = await fetch(`${API_BASE}/admin/approvals`);
+    const response = await fetch(`${API_BASE}/admin/approvals`, { headers: { Authorization: `Bearer ${adminToken}` } });
     if (!response.ok) throw new Error('تعذر تحميل طلبات الموافقة. تأكد إن API شغال على port 4000.');
     setRows(await response.json());
   }
 
   async function loadJobs(){
-    const response = await fetch(`${API_BASE}/provisioning/jobs`);
+    const response = await fetch(`${API_BASE}/provisioning/jobs`, { headers: { Authorization: `Bearer ${adminToken}` } });
     if (!response.ok) throw new Error('تعذر تحميل provisioning jobs.');
     setJobs(await response.json());
   }
@@ -55,6 +58,10 @@ export default function AdminPage(){
   }
 
   async function refreshAll(){
+    if (!adminToken) {
+      setMessage('سجل دخول الأدمن الأول.');
+      return;
+    }
     setMessage('جاري تحميل لوحة الأدمن...');
     try {
       await Promise.all([loadApprovals(), loadJobs(), loadDifyStatus()]);
@@ -64,11 +71,28 @@ export default function AdminPage(){
     }
   }
 
+  async function loginAdmin(){
+    setMessage('جاري تسجيل دخول الأدمن...');
+    const response = await fetch(`${API_BASE}/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: adminEmail, password: adminPassword })
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || data.user?.role !== 'admin') {
+      setMessage(data.message || 'بيانات دخول الأدمن غير صحيحة');
+      return;
+    }
+    localStorage.setItem('dify_saas_admin_token', data.token);
+    setAdminToken(data.token);
+    setMessage('تم تسجيل دخول الأدمن.');
+  }
+
   async function approve(paymentId: string){
     setMessage('جاري اعتماد الدفع وإنشاء provisioning job...');
     const response = await fetch(`${API_BASE}/admin/approvals/${paymentId}/approve`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${adminToken}` },
       body: JSON.stringify({ notes: 'Approved from admin UI' })
     });
     if (!response.ok) {
@@ -82,7 +106,7 @@ export default function AdminPage(){
 
   async function runJob(jobId: string){
     setMessage('جاري تشغيل provisioning job...');
-    const response = await fetch(`${API_BASE}/provisioning/jobs/${jobId}/run`, { method: 'POST' });
+    const response = await fetch(`${API_BASE}/provisioning/jobs/${jobId}/run`, { method: 'POST', headers: { Authorization: `Bearer ${adminToken}` } });
     const data = await response.json().catch(() => ({}));
     if (!response.ok) {
       setMessage(data.message || 'فشل تشغيل provisioning job');
@@ -93,7 +117,12 @@ export default function AdminPage(){
     await refreshAll();
   }
 
-  useEffect(() => { void refreshAll(); }, []);
+  useEffect(() => {
+    const savedToken = localStorage.getItem('dify_saas_admin_token');
+    if (savedToken) setAdminToken(savedToken);
+  }, []);
+
+  useEffect(() => { if (adminToken) void refreshAll(); }, [adminToken]);
 
   const openApprovals = rows.filter(row => row.approval.status === 'open');
   const runnableJobs = jobs.filter(job => job.status === 'queued' || job.status === 'failed');
@@ -101,6 +130,16 @@ export default function AdminPage(){
   return <main className="shell">
     <h1>Internal Admin</h1>
     <p>مراجعة المدفوعات اليدوية وتشغيل Dify provisioning حسب ملف الخطة.</p>
+    <div className="item" style={{marginTop: 20}}>
+      <h2>Admin login</h2>
+      <input className="input" type="email" value={adminEmail} onChange={event => setAdminEmail(event.target.value)} placeholder="Admin email" />
+      <input className="input" type="password" value={adminPassword} onChange={event => setAdminPassword(event.target.value)} placeholder="Admin password" />
+      <div className="cta">
+        <button className="btn" onClick={loginAdmin}>Login</button>
+        <button className="btn secondary" onClick={refreshAll} disabled={!adminToken}>Refresh</button>
+      </div>
+      {adminToken && <p>Admin session active.</p>}
+    </div>
     {message && <p>{message}</p>}
 
     <div className="grid">

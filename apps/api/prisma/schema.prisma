@@ -13,6 +13,7 @@ model User {
   email             String        @unique
   phone             String?
   role              String
+  passwordHash      String?
   preferredLanguage String
   organizationId    String?
   organization      Organization? @relation(fields: [organizationId], references: [id])

@@ -15,6 +15,7 @@ export default function SignupPage(){
     const payload = {
       name: String(form.get('name') || ''),
       email: String(form.get('email') || ''),
+      password: String(form.get('password') || ''),
       phone: String(form.get('phone') || ''),
       companyName: String(form.get('companyName') || ''),
       industry: String(form.get('industry') || ''),
@@ -37,5 +38,5 @@ export default function SignupPage(){
     setStatus('تم إنشاء الحساب. الخطوة التالية: تسجيل إثبات الدفع اليدوي.');
   }
 
-  return <main className="shell form"><h1>إنشاء حساب شركة</h1><p>Phase 1: نجمع بيانات العميل والشركة والباقه قبل الدفع والموافقة.</p><form onSubmit={submit}><input name="name" className="input" placeholder="الاسم" required/><input name="email" type="email" className="input" placeholder="البريد الإلكتروني" required/><input name="phone" className="input" placeholder="رقم الهاتف"/><input name="companyName" className="input" placeholder="اسم الشركة" required/><input name="industry" className="input" placeholder="المجال"/><select name="planId" className="input"><option value="starter">Starter</option><option value="growth">Growth</option><option value="business">Business</option></select><button className="btn">متابعة للدفع</button></form>{status && <div className="item" style={{marginTop: 20}}><strong>{status}</strong>{organizationId && <><p>Organization ID: <code>{organizationId}</code></p><div className="cta"><a className="btn" href={`/payment?organizationId=${organizationId}`}>سجل إثبات الدفع</a><a className="btn secondary" href={`/dashboard?organizationId=${organizationId}`}>افتح لوحة العميل</a></div></>}</div>}</main>
+  return <main className="shell form"><h1>إنشاء حساب شركة</h1><p>Phase 1: نجمع بيانات العميل والشركة والباقه قبل الدفع والموافقة.</p><form onSubmit={submit}><input name="name" className="input" placeholder="الاسم" required/><input name="email" type="email" className="input" placeholder="البريد الإلكتروني" required/><input name="password" type="password" className="input" placeholder="كلمة المرور" required minLength={8}/><input name="phone" className="input" placeholder="رقم الهاتف"/><input name="companyName" className="input" placeholder="اسم الشركة" required/><input name="industry" className="input" placeholder="المجال"/><select name="planId" className="input"><option value="starter">Starter</option><option value="growth">Growth</option><option value="business">Business</option></select><button className="btn">متابعة للدفع</button></form>{status && <div className="item" style={{marginTop: 20}}><strong>{status}</strong>{organizationId && <><p>Organization ID: <code>{organizationId}</code></p><div className="cta"><a className="btn" href={`/payment?organizationId=${organizationId}`}>سجل إثبات الدفع</a><a className="btn secondary" href={`/dashboard?organizationId=${organizationId}`}>افتح لوحة العميل</a></div></>}</div>}</main>
 }
