@@ -74,7 +74,10 @@ export default function DashboardPage(){
         <h2>{current.title}</h2>
         <p>{current.body}</p>
         <p><strong>{summary.organization.name}</strong> · {summary.plan?.name || 'No plan'} · {summary.subscription?.status || 'No subscription'}</p>
-        {summary.aiStudioUrl && <a className="btn" href={summary.aiStudioUrl} target="_blank">Open AI Studio</a>}
+        <div className="cta">
+          {summary.currentStep === 'submit_payment' && <a className="btn" href={`/payment?organizationId=${summary.organization.id}`}>سجل إثبات الدفع</a>}
+          {summary.aiStudioUrl && <a className="btn" href={summary.aiStudioUrl} target="_blank">Open AI Studio</a>}
+        </div>
       </div>
 
       <div className="grid">
