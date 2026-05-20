@@ -387,4 +387,40 @@ Authorization: Bearer ***
 { "attempted": 1, "retried": 1, "failed": 0 }
 ```
 
-الخطوة التالية حسب الملف: status callbacks وواجهة test message من داخل `/integrations`، ثم الانتقال إلى Phase 4 Messenger/Pages + production hardening.
+## WhatsApp test message + status callbacks
+
+تم استكمال آخر جزء وظيفي من Phase 3:
+
+```text
+POST /channels/whatsapp/test-message
+Authorization: Bearer <customer-token>
+Content-Type: application/json
+```
+
+Body:
+
+```json
+{ "to": "201111111111", "text": "هل البوت شغال؟" }
+```
+
+السلوك:
+
+- يستدعي Dify App API بنفس مفاتيح القناة المشفرة.
+- يرسل رد Dify إلى WhatsApp Cloud API.
+- يسجل inbound test event و outbound WhatsApp event داخل `message_events`.
+- لا يرجع access tokens أو Dify API keys للمتصفح.
+- صفحة `/integrations` تعرض فورم `Test message` بعد حفظ WhatsApp/Dify settings.
+
+تمت إضافة دعم Meta status callbacks داخل نفس webhook:
+
+```text
+POST /webhooks/meta
+```
+
+- يقرأ `statuses[]` القادمة من Meta.
+- يحدث حالة outbound `message_event` المطابق مثل `delivered` أو `read` أو `failed`.
+- يخزن تفاصيل status callback داخل `rawPayload.statusCallback` بدون أسرار.
+
+Phase 3 مكتملة وظيفياً الآن: channel settings + Meta webhook verification/inbound + idempotency + Dify reply dispatch + WhatsApp send + logs/retry + status callbacks + test message.
+
+الخطوة التالية حسب الملف: Phase 4 Messenger/Pages + production hardening.

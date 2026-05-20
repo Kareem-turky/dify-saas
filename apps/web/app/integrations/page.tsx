@@ -25,6 +25,8 @@ export default function IntegrationsPage(){
   const [token, setToken] = useState('');
   const [channel, setChannel] = useState<WhatsappChannel | null>(null);
   const [message, setMessage] = useState('');
+  const [testTo, setTestTo] = useState('');
+  const [testText, setTestText] = useState('هل البوت شغال؟');
 
   useEffect(() => {
     const storedToken = localStorage.getItem('authToken') || '';
@@ -46,6 +48,27 @@ export default function IntegrationsPage(){
     if (!response.ok) throw new Error('تعذر تحميل إعدادات WhatsApp.');
     setChannel(await response.json());
     setMessage('');
+  }
+
+  async function sendTestMessage(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!token) {
+      setMessage('سجل دخولك الأول قبل إرسال رسالة اختبار.');
+      return;
+    }
+    setMessage('جاري إرسال رسالة اختبار إلى Dify ثم WhatsApp...');
+    const response = await fetch(`${API_BASE}/channels/whatsapp/test-message`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ to: testTo, text: testText })
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      setMessage(data.message || 'فشل إرسال رسالة الاختبار.');
+      return;
+    }
+    setMessage(`تم إرسال test message بنجاح. WhatsApp event: ${data.outboundEvent?.eventId || 'sent'}`);
+    await loadWhatsapp();
   }
 
   async function saveWhatsapp(event: FormEvent<HTMLFormElement>) {
@@ -118,9 +141,19 @@ export default function IntegrationsPage(){
       </div>
     </section>}
 
+    {channel && <section style={{marginTop: 32}}>
+      <h2>Test message</h2>
+      <form className="card" onSubmit={sendTestMessage}>
+        <label>Recipient WhatsApp number<input value={testTo} onChange={event => setTestTo(event.target.value)} placeholder="201111111111" required /></label>
+        <label>Test prompt<input value={testText} onChange={event => setTestText(event.target.value)} required /></label>
+        <button className="btn" type="submit" disabled={!channel.hasAccessToken || !channel.hasDifyAppApiKey}>Send test message</button>
+      </form>
+      <p>الاختبار يرسل النص إلى Dify App API ثم يرسل رد Dify إلى رقم WhatsApp المحدد، ويسجل inbound/outbound events.</p>
+    </section>}
+
     <section style={{marginTop: 32}}>
       <h2>Next</h2>
-      <p>الخطوة التالية: تحسين retries/status callbacks وواجهة اختبار الرسائل من داخل المنصة.</p>
+      <p>Phase 3 اكتملت وظيفياً: settings + webhooks + Dify replies + retries + status callbacks + test message. التالي Phase 4: Messenger/Pages وproduction hardening.</p>
     </section>
   </main>;
 }

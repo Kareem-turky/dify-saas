@@ -1,4 +1,4 @@
-import { BadRequestException, ForbiddenException, Injectable, NotFoundException, UnauthorizedException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, InternalServerErrorException, NotFoundException, UnauthorizedException } from '@nestjs/common';
 import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes, timingSafeEqual } from 'crypto';
 import { mkdir, writeFile } from 'fs/promises';
 import path from 'path';
@@ -433,6 +433,8 @@ export class SaasService {
   }
 
   async receiveMetaWebhook(payload: unknown) {
+    const statusCallbacks = this.extractWhatsappStatusCallbacks(payload);
+    const statusesUpdated = await this.updateWhatsappStatusCallbacks(statusCallbacks);
     const messages = this.extractWhatsappMessages(payload);
     let processed = 0;
     let duplicates = 0;
@@ -482,9 +484,62 @@ export class SaasService {
       }
     }
 
-    return { received: true, processed, duplicates, ...(ignored ? { ignored } : {}), ...(repliesSent ? { repliesSent } : {}), ...(repliesFailed ? { repliesFailed } : {}) };
+    return { received: true, processed, duplicates, ...(ignored ? { ignored } : {}), ...(statusesUpdated ? { statusesUpdated } : {}), ...(repliesSent ? { repliesSent } : {}), ...(repliesFailed ? { repliesFailed } : {}) };
   }
 
+  async sendWhatsappTestMessage(authorization: string | undefined, input: { to?: string; text?: string }) {
+    const user = await this.requireUser(authorization);
+    if (!user.organizationId) throw new ForbiddenException('Organization is required');
+    const to = input.to?.trim();
+    const text = input.text?.trim();
+    if (!to || !text) throw new BadRequestException('to and text are required');
+
+    const channel = await this.db.channel.findUnique({ where: { organizationId_channelType: { organizationId: user.organizationId, channelType: 'whatsapp' } } });
+    if (!channel) throw new NotFoundException('WhatsApp channel is not configured');
+
+    const inboundEvent = await this.db.messageEvent.create({
+      data: {
+        id: id('evt'),
+        organizationId: channel.organizationId,
+        channelId: channel.id,
+        channelType: 'whatsapp',
+        direction: 'inbound',
+        eventId: `test_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+        fromId: to,
+        toId: channel.phoneNumberId,
+        messageType: 'text',
+        textBody: text,
+        rawPayload: { source: 'integrations_test_message', actorUserId: user.id } as Prisma.InputJsonObject,
+        status: 'received'
+      }
+    });
+
+    try {
+      const replyStatus = await this.processInboundWhatsappMessage(channel, inboundEvent, {
+        fromId: to,
+        messageType: 'text',
+        textBody: text,
+        rawPayload: { source: 'integrations_test_message' }
+      });
+      if (replyStatus !== 'sent') {
+        await this.db.messageEvent.update({ where: { id: inboundEvent.id }, data: { status: 'failed', lastError: 'Test message skipped because WhatsApp/Dify channel is incomplete' } });
+        throw new BadRequestException('WhatsApp and Dify App credentials are required before sending a test message');
+      }
+      const processedInbound = await this.db.messageEvent.findUniqueOrThrow({ where: { id: inboundEvent.id } });
+      const outboundEvent = await this.db.messageEvent.findFirstOrThrow({ where: { channelId: channel.id, direction: 'outbound', toId: to }, orderBy: { createdAt: 'desc' } });
+      return {
+        sent: true,
+        inboundEvent: this.publicMessageEvent(processedInbound),
+        outboundEvent: this.publicMessageEvent(outboundEvent)
+      };
+    } catch (error) {
+      if (error instanceof BadRequestException) throw error;
+      const lastError = sanitizeIntegrationError(error);
+      await this.db.messageEvent.update({ where: { id: inboundEvent.id }, data: { status: 'failed', lastError, nextRetryAt: new Date(Date.now() + 60_000) } });
+      await this.db.channel.update({ where: { id: channel.id }, data: { lastError } });
+      throw new InternalServerErrorException(lastError);
+    }
+  }
 
   async retryFailedMessageEvents(input: { limit?: number; actorUserId?: string }) {
     const limit = Math.min(Math.max(input.limit || 10, 1), 50);
@@ -542,6 +597,44 @@ export class SaasService {
     }
 
     return { attempted: failedEvents.length, retried, failed };
+  }
+
+  private publicMessageEvent(event: { id: string; organizationId: string; channelId: string; channelType: string; direction: string; eventId: string; fromId?: string | null; toId?: string | null; messageType?: string | null; textBody?: string | null; status: string; lastError?: string | null; retryCount: number; nextRetryAt?: Date | null; createdAt: Date; updatedAt: Date }) {
+    return {
+      id: event.id,
+      organizationId: event.organizationId,
+      channelId: event.channelId,
+      channelType: event.channelType,
+      direction: event.direction,
+      eventId: event.eventId,
+      fromId: event.fromId,
+      toId: event.toId,
+      messageType: event.messageType,
+      textBody: event.textBody,
+      status: event.status,
+      lastError: event.lastError,
+      retryCount: event.retryCount,
+      nextRetryAt: event.nextRetryAt,
+      createdAt: event.createdAt,
+      updatedAt: event.updatedAt
+    };
+  }
+
+  private async updateWhatsappStatusCallbacks(statusCallbacks: Array<{ phoneNumberId: string; eventId: string; status: string; recipientId?: string; rawPayload: Record<string, unknown> }>) {
+    let updated = 0;
+    for (const callback of statusCallbacks) {
+      const event = await this.db.messageEvent.findUnique({ where: { eventId: callback.eventId } });
+      if (!event || event.direction !== 'outbound' || event.channelType !== 'whatsapp') continue;
+      await this.db.messageEvent.update({
+        where: { id: event.id },
+        data: {
+          status: callback.status,
+          rawPayload: { ...(event.rawPayload as Record<string, unknown>), statusCallback: { status: callback.status, recipientId: callback.recipientId, phoneNumberId: callback.phoneNumberId, rawPayload: callback.rawPayload } } as Prisma.InputJsonObject
+        }
+      });
+      updated += 1;
+    }
+    return updated;
   }
 
   private async processInboundWhatsappMessage(
@@ -609,6 +702,31 @@ export class SaasService {
     if (!response.ok) throw new Error(`WhatsApp Cloud API failed with HTTP ${response.status}`);
     const firstMessage = Array.isArray(data?.messages) ? data.messages[0] as { id?: string } | undefined : undefined;
     return { messageId: firstMessage?.id, raw: data as Record<string, unknown> };
+  }
+
+  private extractWhatsappStatusCallbacks(payload: unknown) {
+    const root = payload as { entry?: Array<{ changes?: Array<{ value?: { metadata?: { phone_number_id?: string }, statuses?: Array<{ id?: string; status?: string; recipient_id?: string; timestamp?: string }> } }> }> };
+    const extracted: Array<{ phoneNumberId: string; eventId: string; status: string; recipientId?: string; rawPayload: Record<string, unknown> }> = [];
+
+    for (const entry of root.entry || []) {
+      for (const change of entry.changes || []) {
+        const value = change.value;
+        const phoneNumberId = value?.metadata?.phone_number_id;
+        if (!phoneNumberId) continue;
+        for (const status of value.statuses || []) {
+          if (!status.id || !status.status) continue;
+          extracted.push({
+            phoneNumberId,
+            eventId: status.id,
+            status: status.status,
+            recipientId: status.recipient_id,
+            rawPayload: { entry, change, status }
+          });
+        }
+      }
+    }
+
+    return extracted;
   }
 
   private extractWhatsappMessages(payload: unknown) {
