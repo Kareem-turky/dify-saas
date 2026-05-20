@@ -1,16 +1,53 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from './prisma.service';
 
+export type DifyWorkspaceMode = 'dry-run' | 'live';
+
 export interface DifyWorkspaceResult {
   tenantId: string;
   accountId: string;
 }
 
+export interface DifyProvisioningConfig {
+  mode: DifyWorkspaceMode;
+  baseUrl?: string;
+  adminToken?: string;
+}
+
+function readDifyProvisioningConfig(env: NodeJS.ProcessEnv = process.env): DifyProvisioningConfig {
+  const mode = (env.DIFY_WORKSPACE_MODE || 'dry-run') as DifyWorkspaceMode;
+  if (mode !== 'dry-run' && mode !== 'live') {
+    throw new Error('DIFY_WORKSPACE_MODE must be dry-run or live');
+  }
+
+  const config = {
+    mode,
+    baseUrl: env.DIFY_BASE_URL,
+    adminToken: env.DIFY_ADMIN_TOKEN
+  };
+
+  if (mode === 'live' && (!config.baseUrl || !config.adminToken)) {
+    throw new Error('Dify live provisioning requires DIFY_BASE_URL and DIFY_ADMIN_TOKEN');
+  }
+
+  return config;
+}
+
 @Injectable()
 export class DifyProvisioningGateway {
+  private readonly config: DifyProvisioningConfig;
+
+  constructor() {
+    this.config = readDifyProvisioningConfig();
+  }
+
   async ensureWorkspace(input: { organizationId: string; organizationName: string; ownerUserId: string }): Promise<DifyWorkspaceResult> {
-    // Safe default for local/dev/tests. The production HTTP adapter will replace this once
-    // the target Dify admin API credentials/endpoints are configured.
+    if (this.config.mode === 'live') {
+      // Credentials are validated in the constructor, but the live HTTP adapter is kept
+      // disabled until the target Dify admin endpoints are confirmed.
+      throw new Error('Live Dify provisioning adapter is not implemented yet');
+    }
+
     return {
       tenantId: `dry_tenant_${input.organizationId}`,
       accountId: `dry_account_${input.ownerUserId}`
