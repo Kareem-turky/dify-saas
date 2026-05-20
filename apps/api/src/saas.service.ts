@@ -526,11 +526,14 @@ export class SaasService {
     const statusCallbacks = this.extractWhatsappStatusCallbacks(payload);
     const statusesUpdated = await this.updateWhatsappStatusCallbacks(statusCallbacks);
     const messages = this.extractWhatsappMessages(payload);
+    const messengerMessages = this.extractMessengerMessages(payload);
     let processed = 0;
     let duplicates = 0;
     let ignored = 0;
     let repliesSent = 0;
     let repliesFailed = 0;
+    let messengerRepliesSent = 0;
+    let messengerRepliesFailed = 0;
 
     for (const item of messages) {
       const channel = await this.db.channel.findFirst({ where: { channelType: 'whatsapp', phoneNumberId: item.phoneNumberId, status: 'configured' } });
@@ -574,7 +577,49 @@ export class SaasService {
       }
     }
 
-    return { received: true, processed, duplicates, ...(ignored ? { ignored } : {}), ...(statusesUpdated ? { statusesUpdated } : {}), ...(repliesSent ? { repliesSent } : {}), ...(repliesFailed ? { repliesFailed } : {}) };
+    for (const item of messengerMessages) {
+      const channel = await this.db.channel.findFirst({ where: { channelType: 'messenger', phoneNumberId: item.pageId, status: 'configured' } });
+      if (!channel) {
+        ignored += 1;
+        continue;
+      }
+
+      const existing = await this.db.messageEvent.findUnique({ where: { eventId: item.eventId } });
+      if (existing) {
+        duplicates += 1;
+        continue;
+      }
+
+      const inboundEvent = await this.db.messageEvent.create({
+        data: {
+          id: id('evt'),
+          organizationId: channel.organizationId,
+          channelId: channel.id,
+          channelType: 'messenger',
+          direction: 'inbound',
+          eventId: item.eventId,
+          fromId: item.fromId,
+          toId: item.pageId,
+          messageType: item.messageType,
+          textBody: item.textBody,
+          rawPayload: item.rawPayload as Prisma.InputJsonObject,
+          status: 'received'
+        }
+      });
+      processed += 1;
+
+      try {
+        const replyStatus = await this.processInboundMessengerMessage(channel, inboundEvent, item);
+        if (replyStatus === 'sent') messengerRepliesSent += 1;
+      } catch (error) {
+        messengerRepliesFailed += 1;
+        const lastError = sanitizeIntegrationError(error);
+        await this.db.messageEvent.update({ where: { id: inboundEvent.id }, data: { status: 'failed', lastError, nextRetryAt: new Date(Date.now() + 60_000) } });
+        await this.db.channel.update({ where: { id: channel.id }, data: { lastError } });
+      }
+    }
+
+    return { received: true, processed, duplicates, ...(ignored ? { ignored } : {}), ...(statusesUpdated ? { statusesUpdated } : {}), ...(repliesSent ? { repliesSent } : {}), ...(repliesFailed ? { repliesFailed } : {}), ...(messengerRepliesSent ? { messengerRepliesSent } : {}), ...(messengerRepliesFailed ? { messengerRepliesFailed } : {}) };
   }
 
   async sendWhatsappTestMessage(authorization: string | undefined, input: { to?: string; text?: string }) {
@@ -770,6 +815,49 @@ export class SaasService {
     return 'sent' as const;
   }
 
+  private async processInboundMessengerMessage(
+    channel: { id: string; organizationId: string; phoneNumberId: string | null; accessTokenCiphertext?: string | null; difyAppApiKeyCiphertext?: string | null },
+    inboundEvent: { id: string; eventId: string },
+    item: { fromId?: string; messageType?: string; textBody?: string; rawPayload: Record<string, unknown> }
+  ) {
+    if (item.messageType !== 'text' || !item.textBody || !item.fromId || !channel.phoneNumberId || !channel.accessTokenCiphertext || !channel.difyAppApiKeyCiphertext) {
+      return 'skipped' as const;
+    }
+
+    const difyApiKey = decryptSecret(channel.difyAppApiKeyCiphertext);
+    const pageAccessToken = decryptSecret(channel.accessTokenCiphertext);
+    if (!difyApiKey || !pageAccessToken) return 'skipped' as const;
+
+    const difyReply = await this.callDifyAppApi({ apiKey: difyApiKey, query: item.textBody, user: item.fromId, eventId: inboundEvent.eventId });
+    if (!difyReply.answer) return 'skipped' as const;
+
+    const messengerResult = await this.sendMessengerTextReply({ pageAccessToken, to: item.fromId, body: difyReply.answer });
+    const outboundEventId = messengerResult.messageId || `outbound_${inboundEvent.eventId}`;
+
+    await this.db.$transaction(async tx => {
+      await tx.messageEvent.update({ where: { id: inboundEvent.id }, data: { status: 'processed', lastError: null, nextRetryAt: null } });
+      await tx.messageEvent.create({
+        data: {
+          id: id('evt'),
+          organizationId: channel.organizationId,
+          channelId: channel.id,
+          channelType: 'messenger',
+          direction: 'outbound',
+          eventId: outboundEventId,
+          fromId: channel.phoneNumberId,
+          toId: item.fromId,
+          messageType: 'text',
+          textBody: difyReply.answer,
+          rawPayload: { dify: difyReply.raw, messenger: messengerResult.raw } as Prisma.InputJsonObject,
+          status: 'sent'
+        }
+      });
+      await tx.channel.update({ where: { id: channel.id }, data: { lastError: null } });
+    });
+
+    return 'sent' as const;
+  }
+
   private async callDifyAppApi(input: { apiKey: string; query: string; user: string; eventId: string }) {
     const response = await fetch(`${difyAppApiBaseUrl()}/chat-messages`, {
       method: 'POST',
@@ -792,6 +880,18 @@ export class SaasService {
     if (!response.ok) throw new Error(`WhatsApp Cloud API failed with HTTP ${response.status}`);
     const firstMessage = Array.isArray(data?.messages) ? data.messages[0] as { id?: string } | undefined : undefined;
     return { messageId: firstMessage?.id, raw: data as Record<string, unknown> };
+  }
+
+  private async sendMessengerTextReply(input: { pageAccessToken: string; to: string; body: string }) {
+    const response = await fetch(`${metaGraphApiBaseUrl()}/me/messages?access_token=${encodeURIComponent(input.pageAccessToken)}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ recipient: { id: input.to }, message: { text: input.body } })
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(`Messenger Send API failed with HTTP ${response.status}`);
+    const messageId = typeof data?.message_id === 'string' ? data.message_id : undefined;
+    return { messageId, raw: data as Record<string, unknown> };
   }
 
   private extractWhatsappStatusCallbacks(payload: unknown) {
@@ -839,6 +939,30 @@ export class SaasService {
             rawPayload: { entry, change, message }
           });
         }
+      }
+    }
+
+    return extracted;
+  }
+
+  private extractMessengerMessages(payload: unknown) {
+    const root = payload as { entry?: Array<{ id?: string; messaging?: Array<{ sender?: { id?: string }, recipient?: { id?: string }, message?: { mid?: string; text?: string } }> }> };
+    const extracted: Array<{ pageId: string; eventId: string; fromId?: string; messageType?: string; textBody?: string; rawPayload: Record<string, unknown> }> = [];
+
+    for (const entry of root.entry || []) {
+      const pageIdFromEntry = entry.id;
+      for (const messaging of entry.messaging || []) {
+        const pageId = messaging.recipient?.id || pageIdFromEntry;
+        const mid = messaging.message?.mid;
+        if (!pageId || !mid) continue;
+        extracted.push({
+          pageId,
+          eventId: mid,
+          fromId: messaging.sender?.id,
+          messageType: messaging.message?.text ? 'text' : 'unknown',
+          textBody: messaging.message?.text,
+          rawPayload: { entry, messaging }
+        });
       }
     }
 

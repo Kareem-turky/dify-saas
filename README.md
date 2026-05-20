@@ -462,3 +462,43 @@ Body للحفظ:
 
 الخطوة التالية في Phase 4: استقبال Messenger/Page webhook events ثم إرسالها إلى Dify وإرسال الرد عبر Send API، وبعدها production hardening.
 
+## Messenger → Dify reply dispatch
+
+تم إضافة معالجة Messenger/Page webhook events ضمن Phase 4:
+
+```text
+POST /webhooks/meta
+```
+
+السلوك الجديد عند استقبال `object = page` و `entry[].messaging[]`:
+
+- استخراج `sender.id` كـ PSID.
+- استخراج `recipient.id` أو `entry.id` كـ Facebook Page ID.
+- استخدام `message.mid` كـ idempotency key.
+- حفظ inbound `message_event` بقيمة:
+
+```text
+channelType = messenger
+方向/direction = inbound
+```
+
+- إرسال نص المستخدم إلى Dify App API بنفس Dify key المخزن للقناة.
+- إرسال رد Dify عبر Messenger Send API:
+
+```text
+POST {META_GRAPH_API_BASE_URL}/me/messages?access_token=<PAGE_TOKEN>
+```
+
+- حفظ outbound `message_event` بقيمة:
+
+```text
+channelType = messenger
+direction = outbound
+status = sent
+```
+
+- عند تكرار نفس `message.mid` من Meta لا يتم استدعاء Dify أو Messenger مرة ثانية.
+- عند فشل Dify أو Messenger Send API يتم تعليم inbound event كـ `failed` مع `lastError` آمن بدون تسريب Page token أو Dify API key.
+
+الخطوة التالية في Phase 4: Messenger retries/status callbacks ثم production hardening: queue/rate limits/dead-letter/monitoring/security review.
+
