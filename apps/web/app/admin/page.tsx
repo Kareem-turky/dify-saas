@@ -21,9 +21,19 @@ type ProvisioningJobRow = {
   organization?: { id: string; name: string; status: string; difyTenantId?: string | null; difyAccountId?: string | null };
 };
 
+type DifyStatus = {
+  mode: 'dry-run' | 'live';
+  ready: boolean;
+  baseUrl?: string;
+  workspaceEndpoint?: string;
+  tokenConfigured: boolean;
+  requiresExistingDifyOwnerAccount: boolean;
+};
+
 export default function AdminPage(){
   const [rows, setRows] = useState<ApprovalRow[]>([]);
   const [jobs, setJobs] = useState<ProvisioningJobRow[]>([]);
+  const [difyStatus, setDifyStatus] = useState<DifyStatus | null>(null);
   const [message, setMessage] = useState('');
 
   async function loadApprovals(){
@@ -38,10 +48,16 @@ export default function AdminPage(){
     setJobs(await response.json());
   }
 
+  async function loadDifyStatus(){
+    const response = await fetch(`${API_BASE}/provisioning/dify/status`);
+    if (!response.ok) throw new Error('تعذر تحميل حالة Dify gateway.');
+    setDifyStatus(await response.json());
+  }
+
   async function refreshAll(){
     setMessage('جاري تحميل لوحة الأدمن...');
     try {
-      await Promise.all([loadApprovals(), loadJobs()]);
+      await Promise.all([loadApprovals(), loadJobs(), loadDifyStatus()]);
       setMessage('');
     } catch (error) {
       setMessage(error instanceof Error ? error.message : 'حصل خطأ أثناء تحميل لوحة الأدمن');
@@ -92,6 +108,19 @@ export default function AdminPage(){
       <div className="item"><h3>Runnable jobs</h3><p>{runnableJobs.length} job جاهز للتشغيل أو retry.</p></div>
       <div className="item"><h3>Total provisioning</h3><p>{jobs.length} job في النظام.</p></div>
     </div>
+
+    <section style={{marginTop: 32}}>
+      <h2>Dify gateway</h2>
+      <div className="item">
+        {!difyStatus && <p>جاري تحميل حالة Dify...</p>}
+        {difyStatus && <>
+          <p>Mode: <strong>{difyStatus.mode}</strong> · Ready: {difyStatus.ready ? 'yes' : 'no'} · Token: {difyStatus.tokenConfigured ? 'configured' : 'not required'}</p>
+          {difyStatus.baseUrl && <p>Base URL: {difyStatus.baseUrl}</p>}
+          {difyStatus.workspaceEndpoint && <p>Workspace endpoint: {difyStatus.workspaceEndpoint}</p>}
+          {difyStatus.requiresExistingDifyOwnerAccount && <p>Important: owner email must already exist and be activated inside Dify before running live provisioning.</p>}
+        </>}
+      </div>
+    </section>
 
     <section style={{marginTop: 32}}>
       <div className="cta" style={{justifyContent: 'space-between', alignItems: 'center'}}>

@@ -14,6 +14,15 @@ export interface DifyProvisioningConfig {
   adminToken?: string;
 }
 
+export interface DifyProvisioningStatus {
+  mode: DifyWorkspaceMode;
+  ready: boolean;
+  baseUrl?: string;
+  workspaceEndpoint?: string;
+  tokenConfigured: boolean;
+  requiresExistingDifyOwnerAccount: boolean;
+}
+
 export interface DifyWorkspaceInput {
   organizationId: string;
   organizationName: string;
@@ -48,6 +57,26 @@ export class DifyProvisioningGateway {
     this.config = readDifyProvisioningConfig();
   }
 
+  getStatus(): DifyProvisioningStatus {
+    if (this.config.mode === 'dry-run') {
+      return {
+        mode: 'dry-run',
+        ready: true,
+        tokenConfigured: false,
+        requiresExistingDifyOwnerAccount: false
+      };
+    }
+
+    return {
+      mode: 'live',
+      ready: true,
+      baseUrl: this.config.baseUrl,
+      workspaceEndpoint: this.workspaceEndpoint(),
+      tokenConfigured: Boolean(this.config.adminToken),
+      requiresExistingDifyOwnerAccount: true
+    };
+  }
+
   async ensureWorkspace(input: DifyWorkspaceInput): Promise<DifyWorkspaceResult> {
     if (this.config.mode === 'live') {
       return this.ensureLiveWorkspace(input);
@@ -59,13 +88,16 @@ export class DifyProvisioningGateway {
     };
   }
 
+  private workspaceEndpoint(): string {
+    return new URL('/inner/api/enterprise/workspace', this.config.baseUrl).toString();
+  }
+
   private async ensureLiveWorkspace(input: DifyWorkspaceInput): Promise<DifyWorkspaceResult> {
     if (!input.ownerEmail) {
       throw new Error('Dify live provisioning requires ownerEmail');
     }
 
-    const endpoint = new URL('/inner/api/enterprise/workspace', this.config.baseUrl).toString();
-    const response = await fetch(endpoint, {
+    const response = await fetch(this.workspaceEndpoint(), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-Inner-Api-Key': this.config.adminToken! },
       body: JSON.stringify({ name: input.organizationName, owner_email: input.ownerEmail })
@@ -73,7 +105,12 @@ export class DifyProvisioningGateway {
 
     const data = await response.json().catch(() => ({}));
     if (!response.ok) {
-      const message = typeof data?.message === 'string' ? data.message : `Dify workspace creation failed with HTTP ${response.status}`;
+      const difyMessage = typeof data?.message === 'string' ? data.message : '';
+      if (response.status === 404 && difyMessage.toLowerCase().includes('owner account not found')) {
+        throw new Error(`Dify owner account ${input.ownerEmail} was not found. Create or activate this account in Dify before retrying provisioning.`);
+      }
+
+      const message = difyMessage || `Dify workspace creation failed with HTTP ${response.status}`;
       throw new Error(message);
     }
 

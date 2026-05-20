@@ -61,7 +61,13 @@ Header: X-Inner-Api-Key: <DIFY_ADMIN_TOKEN>
 Body: { "name": "Workspace name", "owner_email": "owner@example.com" }
 ```
 
-ملاحظة مهمة: endpoint الحالي في Dify يحتاج owner account موجود مسبقًا بنفس البريد. لو الحساب غير موجود هيرجع 404، لذلك الخطوة القادمة هي ensure/create Dify owner account قبل إنشاء workspace.
+تقدر تشوف وضع الربط من:
+
+```text
+GET /provisioning/dify/status
+```
+
+مهم: endpoint الحالي في Dify يحتاج owner account موجود ومفعّل مسبقًا بنفس البريد. لو الحساب غير موجود، provisioning job هيفشل برسالة واضحة للأدمن تطلب إنشاء/تفعيل الحساب داخل Dify ثم retry.
 
 ## ملاحظات معمارية
 

@@ -29,12 +29,29 @@ describe('Dify provisioning gateway configuration', () => {
       const workspace = await gateway.ensureWorkspace({ organizationId: 'org_123', organizationName: 'Dry Co', ownerUserId: 'usr_456', ownerEmail: 'owner@example.com' });
 
       expect(workspace).toEqual({ tenantId: 'dry_tenant_org_123', accountId: 'dry_account_usr_456' });
+      expect(gateway.getStatus()).toMatchObject({ mode: 'dry-run', ready: true, tokenConfigured: false, requiresExistingDifyOwnerAccount: false });
     });
   });
 
   it('fails fast when live mode is selected without Dify credentials', async () => {
     await withEnv({ DIFY_WORKSPACE_MODE: 'live', DIFY_BASE_URL: undefined, DIFY_ADMIN_TOKEN: undefined }, () => {
       expect(() => new DifyProvisioningGateway()).toThrow('Dify live provisioning requires DIFY_BASE_URL and DIFY_ADMIN_TOKEN');
+    });
+  });
+
+  it('exposes live status without leaking the inner API key', async () => {
+    await withEnv({ DIFY_WORKSPACE_MODE: 'live', DIFY_BASE_URL: 'https://dify.example.com', DIFY_ADMIN_TOKEN: 'inner-secret' }, () => {
+      const gateway = new DifyProvisioningGateway();
+
+      expect(gateway.getStatus()).toEqual({
+        mode: 'live',
+        ready: true,
+        baseUrl: 'https://dify.example.com',
+        workspaceEndpoint: 'https://dify.example.com/inner/api/enterprise/workspace',
+        tokenConfigured: true,
+        requiresExistingDifyOwnerAccount: true
+      });
+      expect(JSON.stringify(gateway.getStatus())).not.toContain('inner-secret');
     });
   });
 
@@ -57,6 +74,26 @@ describe('Dify provisioning gateway configuration', () => {
           body: JSON.stringify({ name: 'Live Co', owner_email: 'owner@live.co' })
         });
         expect(workspace).toEqual({ tenantId: 'tenant_live_123', accountId: 'usr_live' });
+      } finally {
+        global.fetch = previousFetch;
+      }
+    });
+  });
+
+  it('turns Dify missing owner responses into an actionable provisioning error', async () => {
+    await withEnv({ DIFY_WORKSPACE_MODE: 'live', DIFY_BASE_URL: 'https://dify.example.com', DIFY_ADMIN_TOKEN: 'inner-secret' }, async () => {
+      const fetchMock = vi.fn().mockResolvedValue({
+        ok: false,
+        status: 404,
+        json: async () => ({ message: 'owner account not found.' })
+      });
+      const previousFetch = global.fetch;
+      global.fetch = fetchMock as unknown as typeof fetch;
+
+      try {
+        const gateway = new DifyProvisioningGateway();
+        await expect(gateway.ensureWorkspace({ organizationId: 'org_live', organizationName: 'Live Co', ownerUserId: 'usr_live', ownerEmail: 'owner@live.co' }))
+          .rejects.toThrow('Dify owner account owner@live.co was not found. Create or activate this account in Dify before retrying provisioning.');
       } finally {
         global.fetch = previousFetch;
       }
