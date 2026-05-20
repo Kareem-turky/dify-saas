@@ -3,6 +3,28 @@ import { PrismaService } from './prisma.service';
 
 const id = (prefix: string) => `${prefix}_${Math.random().toString(36).slice(2, 10)}`;
 
+function trimTrailingSlash(value: string) {
+  return value.replace(/\/+$/, '');
+}
+
+function buildAiStudioUrl(organization: { id: string; status: string; difyTenantId?: string | null; difyAccountId?: string | null }) {
+  if (organization.status !== 'active' || !organization.difyTenantId) return null;
+
+  const replacements: Record<string, string> = {
+    tenantId: encodeURIComponent(organization.difyTenantId),
+    organizationId: encodeURIComponent(organization.id),
+    accountId: encodeURIComponent(organization.difyAccountId || '')
+  };
+
+  const template = process.env.DIFY_WORKSPACE_URL_TEMPLATE;
+  if (template) {
+    return template.replace(/\{(tenantId|organizationId|accountId)\}/g, (_, key: string) => replacements[key] ?? '');
+  }
+
+  const baseUrl = trimTrailingSlash(process.env.DIFY_CONSOLE_BASE_URL || 'https://studio.local');
+  return `${baseUrl}/tenants/${replacements.tenantId}`;
+}
+
 @Injectable()
 export class SaasService {
   constructor(private readonly db: PrismaService) {}
@@ -124,9 +146,7 @@ export class SaasService {
             ? 'open_ai_studio'
             : 'contact_support';
 
-    const aiStudioUrl = organization.status === 'active' && organization.difyTenantId
-      ? `https://studio.local/tenants/${organization.difyTenantId}`
-      : null;
+    const aiStudioUrl = buildAiStudioUrl(organization);
 
     return {
       organization,

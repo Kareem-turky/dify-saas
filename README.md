@@ -43,7 +43,7 @@ dry_account_<ownerUserId>
 ```bash
 DIFY_WORKSPACE_MODE=live
 DIFY_BASE_URL=https://your-dify.example.com
-DIFY_ADMIN_TOKEN=...
+DIFY_ADMIN_TOKEN=<Dify INNER_API_KEY>
 ```
 
 `DIFY_ADMIN_TOKEN` هنا هو قيمة Dify `INNER_API_KEY`، ولازم نسخة Dify تكون مفعّلة فيها:
@@ -68,6 +68,42 @@ GET /provisioning/dify/status
 ```
 
 مهم: endpoint الحالي في Dify يحتاج owner account موجود ومفعّل مسبقًا بنفس البريد. لو الحساب غير موجود، provisioning job هيفشل برسالة واضحة للأدمن تطلب إنشاء/تفعيل الحساب داخل Dify ثم retry.
+
+## AI Studio URL configuration
+
+زر `Open AI Studio` في customer dashboard يظهر فقط عندما تكون الشركة `active` ومعها `difyTenantId`.
+
+الـ default المحلي:
+
+```text
+https://studio.local/tenants/<tenantId>
+```
+
+لضبط رابط white-label حقيقي:
+
+```bash
+DIFY_CONSOLE_BASE_URL=https://studio.your-domain.com
+```
+
+سيبني الرابط:
+
+```text
+https://studio.your-domain.com/tenants/<tenantId>
+```
+
+ولو محتاج شكل مخصص بالكامل استخدم template:
+
+```bash
+DIFY_WORKSPACE_URL_TEMPLATE="https://studio.your-domain.com/console?tenant={tenantId}&org={organizationId}"
+```
+
+القيم المدعومة في template:
+
+```text
+{tenantId}
+{organizationId}
+{accountId}
+```
 
 ## ملاحظات معمارية
 
