@@ -193,6 +193,8 @@ model MessageEvent {
   rawPayload     Json
   status         String       @default("received")
   lastError      String?
+  retryCount     Int          @default(0)
+  nextRetryAt    DateTime?
   organization   Organization @relation(fields: [organizationId], references: [id])
   channel        Channel      @relation(fields: [channelId], references: [id])
   createdAt      DateTime     @default(now())
@@ -201,4 +203,5 @@ model MessageEvent {
   @@index([organizationId, createdAt])
   @@index([channelId, createdAt])
   @@index([status])
+  @@index([status, nextRetryAt])
 }

@@ -477,12 +477,71 @@ export class SaasService {
       } catch (error) {
         repliesFailed += 1;
         const lastError = sanitizeIntegrationError(error);
-        await this.db.messageEvent.update({ where: { id: inboundEvent.id }, data: { status: 'failed', lastError } });
+        await this.db.messageEvent.update({ where: { id: inboundEvent.id }, data: { status: 'failed', lastError, nextRetryAt: new Date(Date.now() + 60_000) } });
         await this.db.channel.update({ where: { id: channel.id }, data: { lastError } });
       }
     }
 
     return { received: true, processed, duplicates, ...(ignored ? { ignored } : {}), ...(repliesSent ? { repliesSent } : {}), ...(repliesFailed ? { repliesFailed } : {}) };
+  }
+
+
+  async retryFailedMessageEvents(input: { limit?: number; actorUserId?: string }) {
+    const limit = Math.min(Math.max(input.limit || 10, 1), 50);
+    const failedEvents = await this.db.messageEvent.findMany({
+      where: {
+        direction: 'inbound',
+        channelType: 'whatsapp',
+        status: 'failed',
+      },
+      orderBy: { updatedAt: 'asc' },
+      take: limit,
+      include: { channel: true }
+    });
+
+    let retried = 0;
+    let failed = 0;
+
+    for (const event of failedEvents) {
+      const nextRetryCount = event.retryCount + 1;
+      await this.db.messageEvent.update({ where: { id: event.id }, data: { retryCount: nextRetryCount, status: 'retrying' } });
+      try {
+        const replyStatus = await this.processInboundWhatsappMessage(event.channel, event, {
+          fromId: event.fromId || undefined,
+          messageType: event.messageType || undefined,
+          textBody: event.textBody || undefined,
+          rawPayload: event.rawPayload as Record<string, unknown>
+        });
+        if (replyStatus === 'sent') {
+          retried += 1;
+        } else {
+          failed += 1;
+          await this.db.messageEvent.update({
+            where: { id: event.id },
+            data: { status: 'failed', lastError: 'Retry skipped because the message is not dispatchable', retryCount: nextRetryCount, nextRetryAt: new Date(Date.now() + 5 * 60_000) }
+          });
+        }
+      } catch (error) {
+        failed += 1;
+        const lastError = sanitizeIntegrationError(error);
+        await this.db.messageEvent.update({
+          where: { id: event.id },
+          data: { status: 'failed', lastError, retryCount: nextRetryCount, nextRetryAt: new Date(Date.now() + 5 * 60_000) }
+        });
+        await this.db.channel.update({ where: { id: event.channelId }, data: { lastError } });
+      }
+    }
+
+    if (failedEvents.length) {
+      await this.recordAuditLog({
+        actorUserId: input.actorUserId,
+        action: 'message_retry_run',
+        targetType: 'message_event',
+        metadata: { attempted: failedEvents.length, retried, failed }
+      });
+    }
+
+    return { attempted: failedEvents.length, retried, failed };
   }
 
   private async processInboundWhatsappMessage(
@@ -505,7 +564,7 @@ export class SaasService {
     const outboundEventId = whatsappResult.messageId || `outbound_${inboundEvent.eventId}`;
 
     await this.db.$transaction(async tx => {
-      await tx.messageEvent.update({ where: { id: inboundEvent.id }, data: { status: 'processed', lastError: null } });
+      await tx.messageEvent.update({ where: { id: inboundEvent.id }, data: { status: 'processed', lastError: null, nextRetryAt: null } });
       await tx.messageEvent.create({
         data: {
           id: id('evt'),

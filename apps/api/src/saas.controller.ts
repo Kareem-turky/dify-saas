@@ -25,6 +25,7 @@ export class SaasController {
   @Post('webhooks/meta') receiveMetaWebhook(@Body() body: unknown) { return this.saas.receiveMetaWebhook(body); }
   @Get('admin/approvals') async listApprovals(@Headers('authorization') authorization?: string) { await this.saas.requireAdmin(authorization); return this.saas.listApprovals(); }
   @Get('admin/audit-logs') async listAuditLogs(@Headers('authorization') authorization?: string) { await this.saas.requireAdmin(authorization); return this.saas.listAuditLogs(); }
+  @Post('admin/message-events/retry-failed') async retryFailedMessageEvents(@Body() body: { limit?: number }, @Headers('authorization') authorization?: string) { const admin = await this.saas.requireAdmin(authorization); return this.saas.retryFailedMessageEvents({ limit: body?.limit, actorUserId: admin.id }); }
   @Post('admin/approvals/:paymentId/approve') async approve(@Param('paymentId') paymentId: string, @Body() body: { notes?: string }, @Headers('authorization') authorization?: string) { const admin = await this.saas.requireAdmin(authorization); return this.saas.approvePayment(paymentId, body?.notes, admin.id); }
   @Get('provisioning/dify/status') difyStatus() { return this.difyGateway.getStatus(); }
   @Get('provisioning/jobs') async jobs(@Headers('authorization') authorization?: string) { await this.saas.requireAdmin(authorization); return this.saas.listProvisioningJobs(); }

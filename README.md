@@ -361,4 +361,30 @@ CHANNEL_SECRET_KEY=change-me-long-random-secret
 { "received": true, "processed": 1, "duplicates": 0, "repliesFailed": 1 }
 ```
 
-الخطوة التالية حسب الملف: تحسين retries/status callbacks وواجهة test message من داخل `/integrations`.
+## WhatsApp/Dify reply retry foundation
+
+تمت إضافة جزء `Logs + retry + idempotency` من Phase 3:
+
+```text
+POST /admin/message-events/retry-failed
+Authorization: Bearer ***
+```
+
+الـ endpoint أدمن فقط ويعيد معالجة inbound WhatsApp message events التي حالتها `failed`.
+
+السلوك:
+
+- لا يعيد معالجة duplicates القادمة من Meta؛ retry يعمل فقط على failed events المسجلة داخليًا.
+- يزيد `retryCount` لكل محاولة retry.
+- عند النجاح يحول inbound event إلى `processed` وينشئ outbound `message_event` بحالة `sent`.
+- عند الفشل يترك inbound event في `failed` ويحدث `lastError` و`nextRetryAt` بدون تسريب tokens.
+- يسجل audit log باسم `message_retry_run` يحتوي counts فقط بدون أسرار.
+- صفحة `/admin` فيها زر `Retry failed messages` لتشغيل retry يدويًا.
+
+استجابة retry:
+
+```json
+{ "attempted": 1, "retried": 1, "failed": 0 }
+```
+
+الخطوة التالية حسب الملف: status callbacks وواجهة test message من داخل `/integrations`، ثم الانتقال إلى Phase 4 Messenger/Pages + production hardening.

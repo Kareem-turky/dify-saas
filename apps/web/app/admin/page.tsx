@@ -139,6 +139,23 @@ export default function AdminPage(){
     await refreshAll();
   }
 
+  async function retryFailedMessages(){
+    setMessage('جاري إعادة محاولة رسائل WhatsApp/Dify الفاشلة...');
+    const response = await fetch(`${API_BASE}/admin/message-events/retry-failed`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${adminToken}` },
+      body: JSON.stringify({ limit: 10 })
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      setMessage(data.message || 'فشل retry للرسائل الفاشلة');
+      await refreshAll();
+      return;
+    }
+    setMessage(`تمت محاولة ${data.attempted || 0} رسالة: ${data.retried || 0} نجحت، ${data.failed || 0} فشلت.`);
+    await refreshAll();
+  }
+
   async function runDueJobs(){
     setMessage('جاري تشغيل كل provisioning jobs الجاهزة...');
     const response = await fetch(`${API_BASE}/provisioning/jobs/run-due`, { method: 'POST', headers: { Authorization: `Bearer ${adminToken}` } });
@@ -181,6 +198,7 @@ export default function AdminPage(){
       <div className="item"><h3>Open approvals</h3><p>{openApprovals.length} طلب محتاج مراجعة.</p></div>
       <div className="item"><h3>Runnable jobs</h3><p>{runnableJobs.length} job جاهز للتشغيل أو retry.</p></div>
       <div className="item"><h3>Total provisioning</h3><p>{jobs.length} job في النظام.</p></div>
+      <div className="item"><h3>Message retries</h3><p>Retry failed WhatsApp/Dify replies.</p><button className="btn secondary" onClick={retryFailedMessages} disabled={!adminToken}>Retry failed messages</button></div>
     </div>
 
     <section style={{marginTop: 32}}>
@@ -224,6 +242,14 @@ export default function AdminPage(){
         {job.lastError && <p>Last error: {job.lastError}</p>}
         {(job.status === 'queued' || job.status === 'failed') && <button className="btn" onClick={() => runJob(job.id)}>{job.status === 'failed' ? 'Retry job' : 'Run job'}</button>}
       </div>)}
+    </section>
+
+    <section style={{marginTop: 32}}>
+      <h2>WhatsApp/Dify message retries</h2>
+      <div className="item">
+        <p>يعيد تشغيل inbound message events التي فشل إرسال رد Dify/WhatsApp لها، بدون إعادة معالجة duplicates من Meta.</p>
+        <button className="btn" onClick={retryFailedMessages} disabled={!adminToken}>Retry failed messages</button>
+      </div>
     </section>
 
     <section style={{marginTop: 32}}>
