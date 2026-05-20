@@ -98,7 +98,7 @@ export class SaasService {
   }
 
   listProvisioningJobs() {
-    return this.db.provisioningJob.findMany({ orderBy: { createdAt: 'desc' } });
+    return this.db.provisioningJob.findMany({ orderBy: { createdAt: 'desc' }, include: { organization: true } });
   }
 
   async getOrganizationDashboard(organizationId: string) {

@@ -10,23 +10,46 @@ type ApprovalRow = {
   organization?: { id: string; name: string; status: string };
 };
 
+type ProvisioningJobRow = {
+  id: string;
+  organizationId: string;
+  type: string;
+  status: 'queued' | 'running' | 'completed' | 'failed';
+  attempts: number;
+  lastError?: string | null;
+  payload?: Record<string, unknown>;
+  organization?: { id: string; name: string; status: string; difyTenantId?: string | null; difyAccountId?: string | null };
+};
+
 export default function AdminPage(){
   const [rows, setRows] = useState<ApprovalRow[]>([]);
+  const [jobs, setJobs] = useState<ProvisioningJobRow[]>([]);
   const [message, setMessage] = useState('');
 
   async function loadApprovals(){
-    setMessage('جاري تحميل طلبات الموافقة...');
     const response = await fetch(`${API_BASE}/admin/approvals`);
-    if (!response.ok) {
-      setMessage('تعذر تحميل طلبات الموافقة. تأكد إن API شغال على port 4000.');
-      return;
-    }
+    if (!response.ok) throw new Error('تعذر تحميل طلبات الموافقة. تأكد إن API شغال على port 4000.');
     setRows(await response.json());
-    setMessage('');
+  }
+
+  async function loadJobs(){
+    const response = await fetch(`${API_BASE}/provisioning/jobs`);
+    if (!response.ok) throw new Error('تعذر تحميل provisioning jobs.');
+    setJobs(await response.json());
+  }
+
+  async function refreshAll(){
+    setMessage('جاري تحميل لوحة الأدمن...');
+    try {
+      await Promise.all([loadApprovals(), loadJobs()]);
+      setMessage('');
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'حصل خطأ أثناء تحميل لوحة الأدمن');
+    }
   }
 
   async function approve(paymentId: string){
-    setMessage('جاري اعتماد الدفع وتشغيل provisioning job...');
+    setMessage('جاري اعتماد الدفع وإنشاء provisioning job...');
     const response = await fetch(`${API_BASE}/admin/approvals/${paymentId}/approve`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -38,10 +61,62 @@ export default function AdminPage(){
       return;
     }
     setMessage('تم الاعتماد وإنشاء provisioning job.');
-    await loadApprovals();
+    await refreshAll();
   }
 
-  useEffect(() => { void loadApprovals(); }, []);
+  async function runJob(jobId: string){
+    setMessage('جاري تشغيل provisioning job...');
+    const response = await fetch(`${API_BASE}/provisioning/jobs/${jobId}/run`, { method: 'POST' });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      setMessage(data.message || 'فشل تشغيل provisioning job');
+      await refreshAll();
+      return;
+    }
+    setMessage('تم تشغيل provisioning job وتحديث حالة الشركة.');
+    await refreshAll();
+  }
 
-  return <main className="shell"><h1>Internal Admin</h1><p>مراجعة المدفوعات اليدوية والموافقات حسب Phase 1.</p>{message && <p>{message}</p>}<div className="grid"><div className="item"><h3>Manual payment approvals</h3><p>Review proof, approve/reject, trigger provisioning.</p></div><div className="item"><h3>Provisioning jobs</h3><p>Retry jobs and inspect Dify mapping errors.</p></div><div className="item"><h3>Meta channels</h3><p>Token status, webhook health, last event.</p></div></div><section style={{marginTop: 32}}><h2>Open approvals</h2>{rows.length === 0 && <p>لا توجد طلبات موافقة مفتوحة حالياً.</p>}{rows.map(row => <div className="item" key={row.approval.id} style={{marginBottom: 12}}><strong>{row.organization?.name || row.approval.id}</strong><p>Payment: {row.payment?.method} — {row.payment?.amountEgp} EGP — {row.payment?.status}</p><p>Organization status: {row.organization?.status}</p>{row.approval.status === 'open' && row.payment && <button className="btn" onClick={() => approve(row.payment!.id)}>Approve payment</button>}</div>)}</section></main>
+  useEffect(() => { void refreshAll(); }, []);
+
+  const openApprovals = rows.filter(row => row.approval.status === 'open');
+  const runnableJobs = jobs.filter(job => job.status === 'queued' || job.status === 'failed');
+
+  return <main className="shell">
+    <h1>Internal Admin</h1>
+    <p>مراجعة المدفوعات اليدوية وتشغيل Dify provisioning حسب ملف الخطة.</p>
+    {message && <p>{message}</p>}
+
+    <div className="grid">
+      <div className="item"><h3>Open approvals</h3><p>{openApprovals.length} طلب محتاج مراجعة.</p></div>
+      <div className="item"><h3>Runnable jobs</h3><p>{runnableJobs.length} job جاهز للتشغيل أو retry.</p></div>
+      <div className="item"><h3>Total provisioning</h3><p>{jobs.length} job في النظام.</p></div>
+    </div>
+
+    <section style={{marginTop: 32}}>
+      <div className="cta" style={{justifyContent: 'space-between', alignItems: 'center'}}>
+        <h2>Manual payment approvals</h2>
+        <button className="btn secondary" onClick={refreshAll}>Refresh</button>
+      </div>
+      {openApprovals.length === 0 && <p>لا توجد طلبات موافقة مفتوحة حالياً.</p>}
+      {rows.map(row => <div className="item" key={row.approval.id} style={{marginBottom: 12}}>
+        <strong>{row.organization?.name || row.approval.id}</strong>
+        <p>Payment: {row.payment?.method} — {row.payment?.amountEgp} EGP — {row.payment?.status}</p>
+        <p>Reference: {row.payment?.reference || 'No reference'} · Organization status: {row.organization?.status}</p>
+        {row.approval.status === 'open' && row.payment && <button className="btn" onClick={() => approve(row.payment!.id)}>Approve payment</button>}
+      </div>)}
+    </section>
+
+    <section style={{marginTop: 32}}>
+      <h2>Provisioning jobs</h2>
+      {jobs.length === 0 && <p>لا توجد provisioning jobs حتى الآن.</p>}
+      {jobs.map(job => <div className="item" key={job.id} style={{marginBottom: 12}}>
+        <strong>{job.organization?.name || job.organizationId}</strong>
+        <p>Status: {job.status} · Type: {job.type} · Attempts: {job.attempts}</p>
+        <p>Organization: {job.organization?.status || 'unknown'} · Tenant: {job.organization?.difyTenantId || 'not mapped yet'}</p>
+        {job.lastError && <p>Last error: {job.lastError}</p>}
+        {(job.status === 'queued' || job.status === 'failed') && <button className="btn" onClick={() => runJob(job.id)}>{job.status === 'failed' ? 'Retry job' : 'Run job'}</button>}
+      </div>)}
+    </section>
+  </main>
 }
