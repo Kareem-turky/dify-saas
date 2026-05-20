@@ -353,12 +353,102 @@ export class SaasService {
     };
   }
 
+  private publicMessengerChannel(channel: { id: string; organizationId: string; channelType: string; phoneNumberId?: string | null; wabaId?: string | null; accessTokenHash?: string | null; verifyToken?: string | null; appSecretHash?: string | null; difyAppId?: string | null; difyAppApiKeyHash?: string | null; status: string; lastError?: string | null; updatedByUserId?: string | null; createdAt: Date; updatedAt: Date }) {
+    return {
+      id: channel.id,
+      organizationId: channel.organizationId,
+      channelType: channel.channelType,
+      pageId: channel.phoneNumberId,
+      pageName: channel.wabaId,
+      status: channel.status,
+      lastError: channel.lastError,
+      updatedByUserId: channel.updatedByUserId,
+      hasPageAccessToken: Boolean(channel.accessTokenHash),
+      hasVerifyToken: Boolean(channel.verifyToken),
+      hasAppSecret: Boolean(channel.appSecretHash),
+      difyAppId: channel.difyAppId,
+      hasDifyAppApiKey: Boolean(channel.difyAppApiKeyHash),
+      webhookUrl: `${publicApiBaseUrl()}/webhooks/meta`,
+      createdAt: channel.createdAt,
+      updatedAt: channel.updatedAt
+    };
+  }
+
   async getWhatsappChannel(authorization?: string) {
     const user = await this.requireUser(authorization);
     if (!user.organizationId) throw new ForbiddenException('Organization is required');
     const channel = await this.db.channel.findUnique({ where: { organizationId_channelType: { organizationId: user.organizationId, channelType: 'whatsapp' } } });
     if (!channel) throw new NotFoundException('WhatsApp channel is not configured');
     return this.publicChannel(channel);
+  }
+
+  async getMessengerChannel(authorization?: string) {
+    const user = await this.requireUser(authorization);
+    if (!user.organizationId) throw new ForbiddenException('Organization is required');
+    const channel = await this.db.channel.findUnique({ where: { organizationId_channelType: { organizationId: user.organizationId, channelType: 'messenger' } } });
+    if (!channel) throw new NotFoundException('Messenger channel is not configured');
+    return this.publicMessengerChannel(channel);
+  }
+
+  async saveMessengerChannel(authorization: string | undefined, input: { pageId?: string; pageName?: string; pageAccessToken?: string; verifyToken?: string; appSecret?: string; difyAppId?: string; difyAppApiKey?: string }) {
+    const user = await this.requireUser(authorization);
+    if (!user.organizationId) throw new ForbiddenException('Organization is required');
+    const existingChannel = await this.db.channel.findUnique({ where: { organizationId_channelType: { organizationId: user.organizationId, channelType: 'messenger' } } });
+    if (!input.pageId || !input.verifyToken || (!input.pageAccessToken && !existingChannel?.accessTokenHash)) {
+      throw new BadRequestException('pageId, pageAccessToken and verifyToken are required');
+    }
+
+    const channel = await this.db.$transaction(async tx => {
+      const savedChannel = await tx.channel.upsert({
+        where: { organizationId_channelType: { organizationId: user.organizationId!, channelType: 'messenger' } },
+        update: {
+          phoneNumberId: input.pageId,
+          wabaId: input.pageName,
+          accessTokenHash: input.pageAccessToken ? hashSecret(input.pageAccessToken) : existingChannel?.accessTokenHash,
+          accessTokenCiphertext: input.pageAccessToken ? encryptSecret(input.pageAccessToken) : existingChannel?.accessTokenCiphertext,
+          verifyToken: input.verifyToken,
+          appSecretHash: input.appSecret ? hashSecret(input.appSecret) : existingChannel?.appSecretHash,
+          appSecretCiphertext: input.appSecret ? encryptSecret(input.appSecret) : existingChannel?.appSecretCiphertext,
+          difyAppId: input.difyAppId ?? existingChannel?.difyAppId,
+          difyAppApiKeyHash: input.difyAppApiKey ? hashSecret(input.difyAppApiKey) : existingChannel?.difyAppApiKeyHash,
+          difyAppApiKeyCiphertext: input.difyAppApiKey ? encryptSecret(input.difyAppApiKey) : existingChannel?.difyAppApiKeyCiphertext,
+          status: 'configured',
+          lastError: null,
+          updatedByUserId: user.id
+        },
+        create: {
+          id: id('chn'),
+          organizationId: user.organizationId!,
+          channelType: 'messenger',
+          phoneNumberId: input.pageId,
+          wabaId: input.pageName,
+          accessTokenHash: input.pageAccessToken ? hashSecret(input.pageAccessToken) : existingChannel?.accessTokenHash,
+          accessTokenCiphertext: input.pageAccessToken ? encryptSecret(input.pageAccessToken) : existingChannel?.accessTokenCiphertext,
+          verifyToken: input.verifyToken,
+          appSecretHash: input.appSecret ? hashSecret(input.appSecret) : existingChannel?.appSecretHash,
+          appSecretCiphertext: input.appSecret ? encryptSecret(input.appSecret) : existingChannel?.appSecretCiphertext,
+          difyAppId: input.difyAppId,
+          difyAppApiKeyHash: input.difyAppApiKey ? hashSecret(input.difyAppApiKey) : null,
+          difyAppApiKeyCiphertext: input.difyAppApiKey ? encryptSecret(input.difyAppApiKey) : null,
+          status: 'configured',
+          updatedByUserId: user.id
+        }
+      });
+      await tx.auditLog.create({
+        data: {
+          id: id('aud'),
+          actorUserId: user.id,
+          organizationId: user.organizationId,
+          action: 'messenger_channel_saved',
+          targetType: 'channel',
+          targetId: savedChannel.id,
+          metadata: { pageId: input.pageId, pageName: input.pageName, hasAppSecret: Boolean(input.appSecret), hasDifyApp: Boolean(input.difyAppId), hasDifyAppApiKey: Boolean(input.difyAppApiKey) }
+        }
+      });
+      return savedChannel;
+    });
+
+    return this.publicMessengerChannel(channel);
   }
 
   async saveWhatsappChannel(authorization: string | undefined, input: { phoneNumberId?: string; wabaId?: string; accessToken?: string; verifyToken?: string; appSecret?: string; difyAppId?: string; difyAppApiKey?: string }) {
@@ -427,7 +517,7 @@ export class SaasService {
       throw new BadRequestException('Invalid Meta webhook verification request');
     }
 
-    const channel = await this.db.channel.findFirst({ where: { channelType: 'whatsapp', verifyToken: query['hub.verify_token'], status: 'configured' } });
+    const channel = await this.db.channel.findFirst({ where: { channelType: { in: ['whatsapp', 'messenger'] }, verifyToken: query['hub.verify_token'], status: 'configured' } });
     if (!channel) throw new ForbiddenException('Invalid Meta webhook verify token');
     return query['hub.challenge'];
   }

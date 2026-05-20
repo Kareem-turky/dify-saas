@@ -424,3 +424,41 @@ POST /webhooks/meta
 Phase 3 مكتملة وظيفياً الآن: channel settings + Meta webhook verification/inbound + idempotency + Dify reply dispatch + WhatsApp send + logs/retry + status callbacks + test message.
 
 الخطوة التالية حسب الملف: Phase 4 Messenger/Pages + production hardening.
+
+## Phase 4 start — Messenger/Page channel settings
+
+تم بدء Phase 4 بإضافة أول slice لربط Facebook Pages/Messenger بنفس نمط WhatsApp:
+
+```text
+GET /channels/messenger
+PUT /channels/messenger
+Authorization: Bearer <customer-token>
+```
+
+Body للحفظ:
+
+```json
+{
+  "pageId": "page-123",
+  "pageName": "Support Page",
+  "pageAccessToken": "PAGE_TOKEN",
+  "verifyToken": "messenger-verify-token",
+  "appSecret": "APP_SECRET",
+  "difyAppId": "dify-messenger-app",
+  "difyAppApiKey": "DIFY_APP_API_KEY"
+}
+```
+
+السلوك:
+
+- Page access token و app secret و Dify App API key يتم تخزينهم encrypted/hash server-side.
+- الاستجابة لا ترجع أي أسرار؛ فقط flags مثل `hasPageAccessToken` و `hasDifyAppApiKey`.
+- إعدادات Messenger/Page معزولة حسب organization.
+- Meta webhook verification أصبح يقبل verify tokens لقنوات WhatsApp وMessenger.
+- يتم تسجيل `messenger_channel_saved` داخل audit logs بدون أسرار.
+- صفحة `/integrations` أصبحت تحتوي فورم Messenger/Facebook Page settings بجانب WhatsApp.
+
+ملاحظة تنفيذية: أول slice يستخدم نفس جدول `Channel` الحالي مع `channelType = messenger` ويعرض `phoneNumberId` كـ `pageId` و `wabaId` كـ `pageName` لتقليل تغييرات schema في بداية Phase 4. ممكن لاحقًا نفصل الأعمدة semantic لو هنضيف Messenger dispatch كامل.
+
+الخطوة التالية في Phase 4: استقبال Messenger/Page webhook events ثم إرسالها إلى Dify وإرسال الرد عبر Send API، وبعدها production hardening.
+

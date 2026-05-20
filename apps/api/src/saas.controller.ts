@@ -21,6 +21,8 @@ export class SaasController {
   @Post('payments/manual-proof') submitManualPayment(@Body() body: Parameters<SaasService['submitManualPayment']>[0]) { return this.saas.submitManualPayment(body); }
   @Get('channels/whatsapp') getWhatsappChannel(@Headers('authorization') authorization?: string) { return this.saas.getWhatsappChannel(authorization); }
   @Put('channels/whatsapp') saveWhatsappChannel(@Body() body: Parameters<SaasService['saveWhatsappChannel']>[1], @Headers('authorization') authorization?: string) { return this.saas.saveWhatsappChannel(authorization, body); }
+  @Get('channels/messenger') getMessengerChannel(@Headers('authorization') authorization?: string) { return this.saas.getMessengerChannel(authorization); }
+  @Put('channels/messenger') saveMessengerChannel(@Body() body: Parameters<SaasService['saveMessengerChannel']>[1], @Headers('authorization') authorization?: string) { return this.saas.saveMessengerChannel(authorization, body); }
   @Post('channels/whatsapp/test-message') sendWhatsappTestMessage(@Body() body: { to?: string; text?: string }, @Headers('authorization') authorization?: string) { return this.saas.sendWhatsappTestMessage(authorization, body); }
   @Get('webhooks/meta') verifyMetaWebhook(@Query() query: { 'hub.mode'?: string; 'hub.verify_token'?: string; 'hub.challenge'?: string }) { return this.saas.verifyMetaWebhook(query); }
   @Post('webhooks/meta') receiveMetaWebhook(@Body() body: unknown) { return this.saas.receiveMetaWebhook(body); }

@@ -21,9 +21,27 @@ type WhatsappChannel = {
   updatedAt: string;
 };
 
+type MessengerChannel = {
+  id: string;
+  organizationId: string;
+  channelType: string;
+  pageId?: string | null;
+  pageName?: string | null;
+  status: string;
+  lastError?: string | null;
+  hasPageAccessToken: boolean;
+  hasVerifyToken: boolean;
+  hasAppSecret: boolean;
+  difyAppId?: string | null;
+  hasDifyAppApiKey: boolean;
+  webhookUrl: string;
+  updatedAt: string;
+};
+
 export default function IntegrationsPage(){
   const [token, setToken] = useState('');
   const [channel, setChannel] = useState<WhatsappChannel | null>(null);
+  const [messengerChannel, setMessengerChannel] = useState<MessengerChannel | null>(null);
   const [message, setMessage] = useState('');
   const [testTo, setTestTo] = useState('');
   const [testText, setTestText] = useState('هل البوت شغال؟');
@@ -31,7 +49,7 @@ export default function IntegrationsPage(){
   useEffect(() => {
     const storedToken = localStorage.getItem('authToken') || '';
     setToken(storedToken);
-    if (storedToken) void loadWhatsapp(storedToken);
+    if (storedToken) { void loadWhatsapp(storedToken); void loadMessenger(storedToken); }
   }, []);
 
   async function loadWhatsapp(authToken = token) {
@@ -69,6 +87,50 @@ export default function IntegrationsPage(){
     }
     setMessage(`تم إرسال test message بنجاح. WhatsApp event: ${data.outboundEvent?.eventId || 'sent'}`);
     await loadWhatsapp();
+  }
+
+  async function loadMessenger(authToken = token) {
+    if (!authToken) return;
+    const response = await fetch(`${API_BASE}/channels/messenger`, { headers: { Authorization: `Bearer ${authToken}` } });
+    if (response.status === 404) {
+      setMessengerChannel(null);
+      return;
+    }
+    if (!response.ok) throw new Error('تعذر تحميل إعدادات Messenger/Page.');
+    setMessengerChannel(await response.json());
+  }
+
+  async function saveMessenger(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const form = event.currentTarget;
+    if (!token) {
+      setMessage('سجل دخولك الأول قبل حفظ إعدادات Messenger/Page.');
+      return;
+    }
+    const formData = new FormData(form);
+    const payload = {
+      pageId: String(formData.get('pageId') || ''),
+      pageName: String(formData.get('pageName') || '') || undefined,
+      pageAccessToken: String(formData.get('pageAccessToken') || ''),
+      verifyToken: String(formData.get('messengerVerifyToken') || ''),
+      appSecret: String(formData.get('messengerAppSecret') || '') || undefined,
+      difyAppId: String(formData.get('messengerDifyAppId') || '') || undefined,
+      difyAppApiKey: String(formData.get('messengerDifyAppApiKey') || '') || undefined
+    };
+    setMessage('جاري حفظ إعدادات Messenger/Page...');
+    const response = await fetch(`${API_BASE}/channels/messenger`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify(payload)
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      setMessage(data.message || 'فشل حفظ إعدادات Messenger/Page.');
+      return;
+    }
+    setMessengerChannel(data);
+    form.reset();
+    setMessage('تم حفظ إعدادات Messenger/Page بدون عرض الأسرار مرة أخرى.');
   }
 
   async function saveWhatsapp(event: FormEvent<HTMLFormElement>) {
@@ -115,6 +177,7 @@ export default function IntegrationsPage(){
       <div className="item"><h3>Webhook</h3><p>{channel ? 'Configured URL ready' : 'Save settings to generate URL'}</p></div>
       <div className="item"><h3>Secrets</h3><p>{channel?.hasAccessToken ? 'WhatsApp token stored encrypted' : 'WhatsApp token not stored yet'}</p></div>
       <div className="item"><h3>Dify App</h3><p>{channel?.hasDifyAppApiKey ? 'Linked for auto-replies' : 'Not linked yet'}</p></div>
+      <div className="item"><h3>Messenger/Page</h3><p>{messengerChannel?.status || 'Not connected'}</p></div>
     </div>
 
     <section style={{marginTop: 32}}>
@@ -140,6 +203,26 @@ export default function IntegrationsPage(){
         {channel.lastError && <p>Last error: {channel.lastError}</p>}
       </div>
     </section>}
+
+
+    <section style={{marginTop: 32}}>
+      <h2>Messenger / Facebook Page settings</h2>
+      <form className="card" onSubmit={saveMessenger}>
+        <label>Facebook Page ID<input name="pageId" defaultValue={messengerChannel?.pageId || ''} required /></label>
+        <label>Page Name optional<input name="pageName" defaultValue={messengerChannel?.pageName || ''} placeholder="Support Page" /></label>
+        <label>Page Access Token<input name="pageAccessToken" type="password" placeholder={messengerChannel?.hasPageAccessToken ? 'Stored — enter a new token to rotate' : 'Meta Page token'} required={!messengerChannel?.hasPageAccessToken} /></label>
+        <label>Verify Token<input name="messengerVerifyToken" placeholder={messengerChannel?.hasVerifyToken ? 'Stored — enter again to update' : 'Webhook verify token'} required={!messengerChannel?.hasVerifyToken} /></label>
+        <label>App Secret optional<input name="messengerAppSecret" type="password" placeholder={messengerChannel?.hasAppSecret ? 'Stored — enter a new secret to rotate' : 'Meta app secret'} /></label>
+        <label>Dify App ID<input name="messengerDifyAppId" defaultValue={messengerChannel?.difyAppId || ''} placeholder="Dify app id/name for this Messenger Page" /></label>
+        <label>Dify App API Key<input name="messengerDifyAppApiKey" type="password" placeholder={messengerChannel?.hasDifyAppApiKey ? 'Stored encrypted — enter a new key to rotate' : 'Dify App API key'} /></label>
+        <button className="btn" type="submit">Save Messenger/Page settings</button>
+      </form>
+      {messengerChannel && <div className="item" style={{marginTop: 16}}>
+        <p>Webhook URL:</p>
+        <code>{messengerChannel.webhookUrl}</code>
+        {messengerChannel.lastError && <p>Last error: {messengerChannel.lastError}</p>}
+      </div>}
+    </section>
 
     {channel && <section style={{marginTop: 32}}>
       <h2>Test message</h2>
