@@ -168,3 +168,27 @@ DIFY_WORKSPACE_URL_TEMPLATE="https://studio.your-domain.com/console?tenant={tena
 - هذا المشروع منفصل عن `/Users/mac/dify` حتى لا نكسر نسخة Dify الحالية.
 - Dify سيظل AI Studio مدمج/white-label، والمنصة هنا مسؤولة عن التسجيل، الدفع، الموافقات، Meta channels، والـ provisioning.
 - الـ provisioning jobs حالياً queue داخلية قابلة للاستبدال بـ BullMQ/Redis في المرحلة القادمة.
+
+## Provisioning queue runner
+
+تم إضافة endpoint لتشغيل كل jobs الجاهزة بدل تشغيل كل job يدويًا من الأدمن:
+
+```text
+POST /provisioning/jobs/run-due
+Authorization: Bearer <admin-token>
+```
+
+يرجع ملخص batch:
+
+```json
+{
+  "processed": 2,
+  "completed": 2,
+  "failed": 0,
+  "results": [
+    { "jobId": "job_xxxxxxxx", "status": "completed" }
+  ]
+}
+```
+
+لو job فشل، الـ runner يكمل باقي jobs ويسجل الفشل في `results` ويفضل `lastError` محفوظًا على job. صفحة `/admin` فيها زر `Run all ready jobs` لتشغيل كل queued/failed jobs الجاهزة.

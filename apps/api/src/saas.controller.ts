@@ -23,6 +23,7 @@ export class SaasController {
   @Post('admin/approvals/:paymentId/approve') async approve(@Param('paymentId') paymentId: string, @Body() body: { notes?: string }, @Headers('authorization') authorization?: string) { await this.saas.requireAdmin(authorization); return this.saas.approvePayment(paymentId, body?.notes); }
   @Get('provisioning/dify/status') difyStatus() { return this.difyGateway.getStatus(); }
   @Get('provisioning/jobs') async jobs(@Headers('authorization') authorization?: string) { await this.saas.requireAdmin(authorization); return this.saas.listProvisioningJobs(); }
+  @Post('provisioning/jobs/run-due') async runDueProvisioningJobs(@Headers('authorization') authorization?: string) { await this.saas.requireAdmin(authorization); return this.provisioning.runDueJobs(); }
   @Post('provisioning/jobs/:jobId/run') async runProvisioningJob(@Param('jobId') jobId: string, @Headers('authorization') authorization?: string) { await this.saas.requireAdmin(authorization); return this.provisioning.runJob(jobId); }
   @Get('organizations/:organizationId/dashboard') dashboard(@Param('organizationId') organizationId: string) { return this.saas.getOrganizationDashboard(organizationId); }
 }

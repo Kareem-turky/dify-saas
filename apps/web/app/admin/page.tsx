@@ -117,6 +117,19 @@ export default function AdminPage(){
     await refreshAll();
   }
 
+  async function runDueJobs(){
+    setMessage('جاري تشغيل كل provisioning jobs الجاهزة...');
+    const response = await fetch(`${API_BASE}/provisioning/jobs/run-due`, { method: 'POST', headers: { Authorization: `Bearer ${adminToken}` } });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      setMessage(data.message || 'فشل تشغيل jobs الجاهزة');
+      await refreshAll();
+      return;
+    }
+    setMessage(`تم تشغيل ${data.processed || 0} job: ${data.completed || 0} نجح، ${data.failed || 0} فشل.`);
+    await refreshAll();
+  }
+
   useEffect(() => {
     const savedToken = localStorage.getItem('dify_saas_admin_token');
     if (savedToken) setAdminToken(savedToken);
@@ -176,7 +189,10 @@ export default function AdminPage(){
     </section>
 
     <section style={{marginTop: 32}}>
-      <h2>Provisioning jobs</h2>
+      <div className="cta" style={{justifyContent: 'space-between', alignItems: 'center'}}>
+        <h2>Provisioning jobs</h2>
+        <button className="btn secondary" onClick={runDueJobs} disabled={!adminToken || runnableJobs.length === 0}>Run all ready jobs</button>
+      </div>
       {jobs.length === 0 && <p>لا توجد provisioning jobs حتى الآن.</p>}
       {jobs.map(job => <div className="item" key={job.id} style={{marginBottom: 12}}>
         <strong>{job.organization?.name || job.organizationId}</strong>

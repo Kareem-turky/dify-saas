@@ -168,4 +168,32 @@ export class DifyProvisioningService {
       throw new BadRequestException({ message: 'Dify provisioning failed', job: failedJob });
     }
   }
+
+  async runDueJobs(limit = 10) {
+    const jobs = await this.db.provisioningJob.findMany({
+      where: { status: { in: ['queued', 'failed'] } },
+      orderBy: { createdAt: 'asc' },
+      take: limit
+    });
+
+    const results: Array<{ jobId: string; status: 'completed' | 'failed'; error?: string }> = [];
+    for (const job of jobs) {
+      try {
+        const result = await this.runJob(job.id);
+        results.push({ jobId: result.job.id, status: 'completed' });
+      } catch (error) {
+        const response = error instanceof BadRequestException ? error.getResponse() : undefined;
+        const maybeJob = typeof response === 'object' && response !== null && 'job' in response ? (response as { job?: { id?: string; lastError?: string | null } }).job : undefined;
+        const message = maybeJob?.lastError || (error instanceof Error ? error.message : 'Unknown provisioning error');
+        results.push({ jobId: maybeJob?.id || job.id, status: 'failed', error: message });
+      }
+    }
+
+    return {
+      processed: results.length,
+      completed: results.filter(result => result.status === 'completed').length,
+      failed: results.filter(result => result.status === 'failed').length,
+      results
+    };
+  }
 }
