@@ -14,6 +14,13 @@ export interface DifyProvisioningConfig {
   adminToken?: string;
 }
 
+export interface DifyWorkspaceInput {
+  organizationId: string;
+  organizationName: string;
+  ownerUserId: string;
+  ownerEmail?: string;
+}
+
 function readDifyProvisioningConfig(env: NodeJS.ProcessEnv = process.env): DifyProvisioningConfig {
   const mode = (env.DIFY_WORKSPACE_MODE || 'dry-run') as DifyWorkspaceMode;
   if (mode !== 'dry-run' && mode !== 'live') {
@@ -41,17 +48,41 @@ export class DifyProvisioningGateway {
     this.config = readDifyProvisioningConfig();
   }
 
-  async ensureWorkspace(input: { organizationId: string; organizationName: string; ownerUserId: string }): Promise<DifyWorkspaceResult> {
+  async ensureWorkspace(input: DifyWorkspaceInput): Promise<DifyWorkspaceResult> {
     if (this.config.mode === 'live') {
-      // Credentials are validated in the constructor, but the live HTTP adapter is kept
-      // disabled until the target Dify admin endpoints are confirmed.
-      throw new Error('Live Dify provisioning adapter is not implemented yet');
+      return this.ensureLiveWorkspace(input);
     }
 
     return {
       tenantId: `dry_tenant_${input.organizationId}`,
       accountId: `dry_account_${input.ownerUserId}`
     };
+  }
+
+  private async ensureLiveWorkspace(input: DifyWorkspaceInput): Promise<DifyWorkspaceResult> {
+    if (!input.ownerEmail) {
+      throw new Error('Dify live provisioning requires ownerEmail');
+    }
+
+    const endpoint = new URL('/inner/api/enterprise/workspace', this.config.baseUrl).toString();
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Inner-Api-Key': this.config.adminToken! },
+      body: JSON.stringify({ name: input.organizationName, owner_email: input.ownerEmail })
+    });
+
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      const message = typeof data?.message === 'string' ? data.message : `Dify workspace creation failed with HTTP ${response.status}`;
+      throw new Error(message);
+    }
+
+    const tenantId = data?.tenant?.id;
+    if (!tenantId || typeof tenantId !== 'string') {
+      throw new Error('Dify workspace creation response did not include tenant.id');
+    }
+
+    return { tenantId, accountId: input.ownerUserId };
   }
 }
 
@@ -72,10 +103,12 @@ export class DifyProvisioningService {
     });
 
     try {
+      const owner = await this.db.user.findUnique({ where: { id: job.organization.ownerUserId } });
       const result = await this.gateway.ensureWorkspace({
         organizationId: job.organization.id,
         organizationName: job.organization.name,
-        ownerUserId: job.organization.ownerUserId
+        ownerUserId: job.organization.ownerUserId,
+        ownerEmail: owner?.email
       });
 
       return this.db.$transaction(async tx => {

@@ -38,7 +38,7 @@ dry_tenant_<organizationId>
 dry_account_<ownerUserId>
 ```
 
-وضع `live` موجود كـ configuration guard فقط حاليًا. لو اخترته لازم تضبط:
+وضع `live` يستخدم Dify Inner API لإنشاء workspace:
 
 ```bash
 DIFY_WORKSPACE_MODE=live
@@ -46,7 +46,22 @@ DIFY_BASE_URL=https://your-dify.example.com
 DIFY_ADMIN_TOKEN=...
 ```
 
-بدون هذه القيم الـ API يفشل سريعًا برسالة واضحة بدل ما يعمل dry-run بالغلط. الـ live HTTP adapter نفسه لسه غير مفعّل عمدًا لحد ما نثبت endpoints والـ credentials النهائية.
+`DIFY_ADMIN_TOKEN` هنا هو قيمة Dify `INNER_API_KEY`، ولازم نسخة Dify تكون مفعّلة فيها:
+
+```bash
+INNER_API=true
+INNER_API_KEY=<same token>
+```
+
+الـ endpoint المستخدم:
+
+```text
+POST /inner/api/enterprise/workspace
+Header: X-Inner-Api-Key: <DIFY_ADMIN_TOKEN>
+Body: { "name": "Workspace name", "owner_email": "owner@example.com" }
+```
+
+ملاحظة مهمة: endpoint الحالي في Dify يحتاج owner account موجود مسبقًا بنفس البريد. لو الحساب غير موجود هيرجع 404، لذلك الخطوة القادمة هي ensure/create Dify owner account قبل إنشاء workspace.
 
 ## ملاحظات معمارية
 
