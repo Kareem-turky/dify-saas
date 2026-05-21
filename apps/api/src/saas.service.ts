@@ -294,6 +294,55 @@ export class SaasService {
     return { ...result, nextStep: 'admin_review' };
   }
 
+  async requestPlanUpgrade(authorization: string | undefined, input: { planId?: string; method?: 'instapay' | 'vodafone_cash' | 'bank_transfer'; amountEgp?: number; reference?: string; proofUrl?: string; proofUploadId?: string }) {
+    const user = await this.requireUser(authorization);
+    if (!user.organizationId) throw new ForbiddenException('Organization is required');
+    const organization = await this.db.organization.findUnique({ where: { id: user.organizationId } });
+    if (!organization) throw new NotFoundException('Organization not found');
+    if (organization.status !== 'active') throw new BadRequestException('Organization must be active before requesting a plan upgrade');
+
+    const currentSubscription = await this.db.subscription.findFirst({ where: { organizationId: organization.id, status: 'active' }, orderBy: { createdAt: 'desc' }, include: { plan: true } });
+    if (!currentSubscription) throw new BadRequestException('Active subscription is required before requesting a plan upgrade');
+    const targetPlan = input.planId ? await this.db.plan.findUnique({ where: { id: input.planId } }) : null;
+    if (!targetPlan) throw new BadRequestException('Unknown target plan');
+    if (targetPlan.monthlyPriceEgp <= currentSubscription.plan.monthlyPriceEgp) throw new BadRequestException('Upgrade plan must be higher than the current plan');
+
+    const uploadedProof = input.proofUploadId
+      ? await this.db.paymentProof.findUnique({ where: { id: input.proofUploadId } })
+      : null;
+    if (input.proofUploadId && !uploadedProof) throw new NotFoundException('Payment proof upload not found');
+    if (uploadedProof && uploadedProof.organizationId !== organization.id) throw new BadRequestException('Payment proof upload does not belong to this organization');
+    if (uploadedProof?.paymentId) throw new BadRequestException('Payment proof upload is already attached to a payment');
+
+    const subscriptionId = id('sub');
+    const paymentId = id('pay');
+    const approvalId = id('apr');
+    const proofUrl = uploadedProof?.proofUrl || input.proofUrl;
+
+    const result = await this.db.$transaction(async tx => {
+      const upgradeSubscription = await tx.subscription.create({ data: { id: subscriptionId, organizationId: organization.id, planId: targetPlan.id, status: 'needs_review' } });
+      const payment = await tx.payment.create({
+        data: { id: paymentId, organizationId: organization.id, subscriptionId: upgradeSubscription.id, method: input.method || 'instapay', amountEgp: input.amountEgp || targetPlan.monthlyPriceEgp, status: 'needs_review', reference: input.reference, proofUrl }
+      });
+      if (uploadedProof) await tx.paymentProof.update({ where: { id: uploadedProof.id }, data: { paymentId: payment.id, status: 'attached' } });
+      const approval = await tx.approvalRequest.create({ data: { id: approvalId, organizationId: organization.id, paymentId: payment.id, status: 'open' } });
+      await tx.auditLog.create({
+        data: {
+          id: id('aud'),
+          actorUserId: user.id,
+          organizationId: organization.id,
+          action: 'plan_upgrade_requested',
+          targetType: 'subscription',
+          targetId: upgradeSubscription.id,
+          metadata: { fromPlanId: currentSubscription.planId, toPlanId: targetPlan.id, paymentId: payment.id }
+        }
+      });
+      return { subscription: upgradeSubscription, payment, approval, organization };
+    });
+
+    return { ...result, nextStep: 'admin_review' };
+  }
+
   async storePaymentProof(input: { organizationId: string; file?: { originalname?: string; mimetype?: string; size?: number; buffer?: Buffer } }) {
     const organization = await this.db.organization.findUnique({ where: { id: input.organizationId } });
     if (!organization) throw new NotFoundException('Organization not found');
@@ -352,15 +401,18 @@ export class SaasService {
     const organization = await this.db.organization.findUnique({ where: { id: payment.organizationId } });
     if (!organization) throw new NotFoundException('Organization not found');
 
-    const jobId = id('job');
+    const isUpgradeApproval = organization.status === 'active' && Boolean(organization.difyTenantId);
+    const jobId = isUpgradeApproval ? null : id('job');
     return this.db.$transaction(async tx => {
       const paidPayment = await tx.payment.update({ where: { id: payment.id }, data: { status: 'paid' } });
       const approvedRequest = await tx.approvalRequest.update({ where: { id: approval.id }, data: { status: 'approved', notes } });
       const activeSubscription = await tx.subscription.update({ where: { id: subscription.id }, data: { status: 'active' } });
-      const provisioningOrganization = await tx.organization.update({ where: { id: organization.id }, data: { status: 'provisioning' } });
-      const provisioningJob = await tx.provisioningJob.create({
+      const provisioningOrganization = isUpgradeApproval
+        ? organization
+        : await tx.organization.update({ where: { id: organization.id }, data: { status: 'provisioning' } });
+      const provisioningJob = isUpgradeApproval ? null : await tx.provisioningJob.create({
         data: {
-          id: jobId,
+          id: jobId!,
           organizationId: organization.id,
           type: 'create_dify_workspace',
           status: 'queued',
@@ -373,10 +425,10 @@ export class SaasService {
           id: id('aud'),
           actorUserId,
           organizationId: organization.id,
-          action: 'payment_approved',
+          action: isUpgradeApproval ? 'plan_upgrade_approved' : 'payment_approved',
           targetType: 'payment',
           targetId: payment.id,
-          metadata: { approvalId: approval.id, provisioningJobId: jobId, notes: notes || null }
+          metadata: { approvalId: approval.id, provisioningJobId: jobId, notes: notes || null, subscriptionId: subscription.id }
         }
       });
       return { payment: paidPayment, approval: approvedRequest, subscription: activeSubscription, organization: provisioningOrganization, provisioningJob };

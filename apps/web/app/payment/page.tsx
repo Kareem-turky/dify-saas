@@ -8,6 +8,7 @@ type DashboardSummary = {
   organization: { id: string; name: string; status: string };
   plan: { id: string; name: string; monthlyPriceEgp: number } | null;
   payment: { id: string; status: string; method: string; amountEgp: number; reference?: string | null; proofUrl?: string | null } | null;
+  usage?: { upgradeRecommendation?: { recommendedPlanId: string; recommendedPlanName: string; monthlyPriceEgp: number } };
 };
 
 function getInitialOrganizationId() {
@@ -16,14 +17,20 @@ function getInitialOrganizationId() {
   return params.get('organizationId') || localStorage.getItem('dify_saas_organization_id') || '';
 }
 
+function getInitialUpgradePlanId() {
+  if (typeof window === 'undefined') return '';
+  return new URLSearchParams(window.location.search).get('upgradePlanId') || '';
+}
+
 export default function PaymentPage(){
   const [organizationId, setOrganizationId] = useState('');
+  const [upgradePlanId, setUpgradePlanId] = useState('');
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
   const [status, setStatus] = useState('');
   const [submittedPaymentId, setSubmittedPaymentId] = useState('');
   const [uploadedProof, setUploadedProof] = useState<{ id: string; proofUrl: string; originalName: string } | null>(null);
 
-  useEffect(() => { setOrganizationId(getInitialOrganizationId()); }, []);
+  useEffect(() => { setOrganizationId(getInitialOrganizationId()); setUpgradePlanId(getInitialUpgradePlanId()); }, []);
 
   useEffect(() => {
     if (!organizationId) return;
@@ -67,20 +74,28 @@ export default function PaymentPage(){
       setUploadedProof({ id: uploadData.id, proofUrl: uploadData.proofUrl, originalName: uploadData.originalName });
     }
 
+    const recommendedUpgrade = summary?.usage?.upgradeRecommendation;
+    const targetUpgradePlanId = upgradePlanId || recommendedUpgrade?.recommendedPlanId || '';
     const payload = {
       organizationId,
       method: String(form.get('method') || 'instapay') as 'instapay' | 'vodafone_cash' | 'bank_transfer',
-      amountEgp: Number(form.get('amountEgp') || summary?.plan?.monthlyPriceEgp || 0),
+      amountEgp: Number(form.get('amountEgp') || (targetUpgradePlanId ? recommendedUpgrade?.monthlyPriceEgp : summary?.plan?.monthlyPriceEgp) || 0),
       reference: String(form.get('reference') || ''),
       proofUploadId: proofUploadId || undefined,
       proofUrl: proofUrl || String(form.get('proofUrl') || '')
     };
 
-    setStatus('جاري تسجيل إثبات الدفع...');
-    const response = await fetch(`${API_BASE}/payments/manual-proof`, {
+    setStatus(targetUpgradePlanId ? 'جاري تسجيل طلب ترقية الباقة...' : 'جاري تسجيل إثبات الدفع...');
+    const endpoint = targetUpgradePlanId ? `${API_BASE}/subscriptions/upgrade` : `${API_BASE}/payments/manual-proof`;
+    const authToken = typeof window !== 'undefined' ? localStorage.getItem('authToken') || '' : '';
+    if (targetUpgradePlanId && !authToken) {
+      setStatus('سجل دخولك الأول قبل طلب ترقية الباقة.');
+      return;
+    }
+    const response = await fetch(endpoint, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
+      headers: { 'Content-Type': 'application/json', ...(targetUpgradePlanId ? { Authorization: `Bearer ${authToken}` } : {}) },
+      body: JSON.stringify(targetUpgradePlanId ? { ...payload, planId: targetUpgradePlanId } : payload)
     });
     const data = await response.json();
     if (!response.ok) {
@@ -89,7 +104,7 @@ export default function PaymentPage(){
     }
 
     setSubmittedPaymentId(data.payment.id);
-    setStatus('تم تسجيل إثبات الدفع. الحالة الآن في انتظار مراجعة الأدمن.');
+    setStatus(upgradePlanId ? 'تم تسجيل طلب الترقية. الحالة الآن في انتظار مراجعة الأدمن.' : 'تم تسجيل إثبات الدفع. الحالة الآن في انتظار مراجعة الأدمن.');
   }
 
   return <main className="shell form">
@@ -100,6 +115,7 @@ export default function PaymentPage(){
       <strong>Organization ID</strong>
       <input className="input" value={organizationId} onChange={event => setOrganizationId(event.target.value)} placeholder="org_xxxxxxxx" />
       {summary && <p>{summary.organization.name} · {summary.organization.status} · {summary.plan?.name || 'No plan'}</p>}
+      {upgradePlanId && <p>طلب ترقية إلى باقة: {summary?.usage?.upgradeRecommendation?.recommendedPlanName || upgradePlanId}</p>}
       {summary?.payment && <p>آخر دفع مسجل: {summary.payment.status} · {summary.payment.amountEgp} EGP</p>}
     </div>
 
@@ -109,7 +125,7 @@ export default function PaymentPage(){
         <option value="vodafone_cash">Vodafone Cash</option>
         <option value="bank_transfer">Bank transfer</option>
       </select>
-      <input name="amountEgp" type="number" className="input" placeholder="المبلغ بالجنيه" defaultValue={summary?.plan?.monthlyPriceEgp || ''} required />
+      <input name="amountEgp" type="number" className="input" placeholder="المبلغ بالجنيه" defaultValue={(upgradePlanId ? summary?.usage?.upgradeRecommendation?.monthlyPriceEgp : summary?.plan?.monthlyPriceEgp) || ''} required />
       <input name="reference" className="input" placeholder="رقم العملية / Reference" required />
       <label className="item" style={{display: 'block'}}>
         <strong>صورة/ملف إثبات الدفع</strong>

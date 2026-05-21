@@ -603,6 +603,7 @@ windowEnd
 - صفحة `/dashboard` تعرض استخدام الرسائل الحالي وحد الباقة.
 - نفس `usage` يرجع الآن استخدام القنوات: `channelsUsed`, `channelLimit`, `channelsRemaining`, `channelLimitReached`.
 - عند الوصول لحد الرسائل أو القنوات يرجع `upgradeRecommendation` بأقرب باقة أعلى مناسبة، وتعرض صفحة `/dashboard` CTA للترقية.
+- `POST /subscriptions/upgrade` ينشئ subscription جديدة بالباقة الأعلى + payment/approval review بدون تعطيل workspace نشط، وعند موافقة الأدمن لا يتم إنشاء provisioning job جديد إذا كانت مساحة Dify موجودة بالفعل.
 
 ## Channel limits foundation
 
