@@ -72,4 +72,18 @@ describe('Plan channel limits', () => {
     const channels = await moduleRef.get(PrismaService).channel.findMany({ where: { organizationId: customer.organizationId } });
     expect(channels).toHaveLength(1);
   });
+
+  it('reports channel usage and channel limit on the organization dashboard', async () => {
+    const customer = await signupAndLogin(app, 'dashboard-channel-usage');
+
+    await saveWhatsapp(app, customer.token, 'dashboard-channel').expect(200);
+
+    const response = await request(app.getHttpServer()).get(`/organizations/${customer.organizationId}/dashboard`).expect(200);
+    expect(response.body.usage).toMatchObject({
+      channelsUsed: 1,
+      channelLimit: 1,
+      channelsRemaining: 0,
+      channelLimitReached: true
+    });
+  });
 });

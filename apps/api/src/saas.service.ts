@@ -806,13 +806,19 @@ export class SaasService {
       }
     });
     const messageLimit = subscription?.plan?.messageLimit ?? 0;
+    const channelsUsed = await this.db.channel.count({ where: { organizationId, status: 'configured' } });
+    const channelLimit = subscription?.plan?.channelLimit ?? 0;
     return {
       windowStart: window.start.toISOString(),
       windowEnd: window.end.toISOString(),
       messagesUsed,
       messageLimit,
       messagesRemaining: Math.max(messageLimit - messagesUsed, 0),
-      limitReached: messageLimit > 0 && messagesUsed >= messageLimit
+      limitReached: messageLimit > 0 && messagesUsed >= messageLimit,
+      channelsUsed,
+      channelLimit,
+      channelsRemaining: Math.max(channelLimit - channelsUsed, 0),
+      channelLimitReached: channelLimit > 0 && channelsUsed >= channelLimit
     };
   }
 

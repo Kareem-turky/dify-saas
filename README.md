@@ -585,6 +585,10 @@ messagesUsed
 messageLimit
 messagesRemaining
 limitReached
+channelsUsed
+channelLimit
+channelsRemaining
+channelLimitReached
 windowStart
 windowEnd
 ```
@@ -596,6 +600,7 @@ windowEnd
   - لا يتم استدعاء Dify App API ولا Meta Send API.
   - response يحتوي `usageLimited` عند حدوث ذلك.
 - صفحة `/dashboard` تعرض استخدام الرسائل الحالي وحد الباقة.
+- نفس `usage` يرجع الآن استخدام القنوات: `channelsUsed`, `channelLimit`, `channelsRemaining`, `channelLimitReached`.
 
 ## Channel limits foundation
 

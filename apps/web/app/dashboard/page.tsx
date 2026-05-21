@@ -13,7 +13,7 @@ type DashboardSummary = {
   provisioningJob: { id: string; status: string; attempts: number; lastError?: string | null } | null;
   currentStep: 'submit_payment' | 'wait_for_admin_review' | 'wait_for_ai_studio' | 'open_ai_studio' | 'contact_support';
   aiStudioUrl: string | null;
-  usage?: { messagesUsed: number; messageLimit: number; messagesRemaining: number; limitReached: boolean; windowStart: string; windowEnd: string };
+  usage?: { messagesUsed: number; messageLimit: number; messagesRemaining: number; limitReached: boolean; windowStart: string; windowEnd: string; channelsUsed: number; channelLimit: number; channelsRemaining: number; channelLimitReached: boolean };
 };
 
 const stepCopy: Record<DashboardSummary['currentStep'], { title: string; body: string }> = {
@@ -93,6 +93,7 @@ export default function DashboardPage(){
         <div className="item"><strong>Approval</strong><p>{summary.approval?.status || 'لا يوجد طلب مراجعة بعد'}</p></div>
         <div className="item"><strong>Provisioning</strong><p>{summary.provisioningJob ? `${summary.provisioningJob.status} · attempts ${summary.provisioningJob.attempts}` : 'لم يبدأ بعد'}</p></div>
         <div className="item"><strong>Message usage</strong><p>{summary.usage ? `${summary.usage.messagesUsed}/${summary.usage.messageLimit} messages · remaining ${summary.usage.messagesRemaining}` : 'Usage not loaded yet'}</p>{summary.usage?.limitReached && <p>تم الوصول لحد الرسائل الشهري. الرسائل الجديدة لن تُرسل إلى Dify قبل تجديد/ترقية الباقة.</p>}</div>
+        <div className="item"><strong>Channel usage</strong><p>{summary.usage ? `${summary.usage.channelsUsed}/${summary.usage.channelLimit} channels · remaining ${summary.usage.channelsRemaining}` : 'Usage not loaded yet'}</p>{summary.usage?.channelLimitReached && <p>تم الوصول لحد القنوات في الباقة. ترقية الباقة مطلوبة لإضافة WhatsApp أو Messenger جديد.</p>}</div>
       </div>
     </>}
   </main>
