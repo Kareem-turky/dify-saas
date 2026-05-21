@@ -74,6 +74,7 @@ describe('Plan usage limits', () => {
     const response = await request(app.getHttpServer()).get(`/organizations/${customer.organizationId}/dashboard`).expect(200);
 
     expect(response.body.usage).toMatchObject({ messagesUsed: 1, messageLimit: 1, messagesRemaining: 0, limitReached: true });
+    expect(response.body.usage.upgradeRecommendation).toMatchObject({ reason: 'message_limit', currentPlanId: 'starter', recommendedPlanId: 'growth' });
   });
 
   it('stores inbound messages as usage_limited and skips Dify/WhatsApp once the monthly message limit is reached', async () => {

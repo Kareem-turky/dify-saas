@@ -808,18 +808,33 @@ export class SaasService {
     const messageLimit = subscription?.plan?.messageLimit ?? 0;
     const channelsUsed = await this.db.channel.count({ where: { organizationId, status: 'configured' } });
     const channelLimit = subscription?.plan?.channelLimit ?? 0;
+    const limitReached = messageLimit > 0 && messagesUsed >= messageLimit;
+    const channelLimitReached = channelLimit > 0 && channelsUsed >= channelLimit;
+    const upgradeReason = limitReached ? 'message_limit' : channelLimitReached ? 'channel_limit' : null;
+    const recommendedPlan = subscription?.plan && upgradeReason
+      ? await this.findUpgradePlan(subscription.plan, upgradeReason)
+      : null;
     return {
       windowStart: window.start.toISOString(),
       windowEnd: window.end.toISOString(),
       messagesUsed,
       messageLimit,
       messagesRemaining: Math.max(messageLimit - messagesUsed, 0),
-      limitReached: messageLimit > 0 && messagesUsed >= messageLimit,
+      limitReached,
       channelsUsed,
       channelLimit,
       channelsRemaining: Math.max(channelLimit - channelsUsed, 0),
-      channelLimitReached: channelLimit > 0 && channelsUsed >= channelLimit
+      channelLimitReached,
+      ...(upgradeReason && recommendedPlan ? { upgradeRecommendation: { reason: upgradeReason, currentPlanId: subscription!.plan.id, recommendedPlanId: recommendedPlan.id, recommendedPlanName: recommendedPlan.name, monthlyPriceEgp: recommendedPlan.monthlyPriceEgp } } : {})
     };
+  }
+
+  private async findUpgradePlan(currentPlan: { id: string; monthlyPriceEgp: number; messageLimit: number; channelLimit: number }, reason: 'message_limit' | 'channel_limit') {
+    const plans = await this.db.plan.findMany({ orderBy: { monthlyPriceEgp: 'asc' } });
+    return plans.find(plan =>
+      plan.monthlyPriceEgp > currentPlan.monthlyPriceEgp &&
+      (reason === 'message_limit' ? plan.messageLimit > currentPlan.messageLimit : plan.channelLimit > currentPlan.channelLimit)
+    ) || null;
   }
 
   private async markUsageLimited(eventId: string) {

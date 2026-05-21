@@ -589,6 +589,7 @@ channelsUsed
 channelLimit
 channelsRemaining
 channelLimitReached
+upgradeRecommendation
 windowStart
 windowEnd
 ```
@@ -601,6 +602,7 @@ windowEnd
   - response يحتوي `usageLimited` عند حدوث ذلك.
 - صفحة `/dashboard` تعرض استخدام الرسائل الحالي وحد الباقة.
 - نفس `usage` يرجع الآن استخدام القنوات: `channelsUsed`, `channelLimit`, `channelsRemaining`, `channelLimitReached`.
+- عند الوصول لحد الرسائل أو القنوات يرجع `upgradeRecommendation` بأقرب باقة أعلى مناسبة، وتعرض صفحة `/dashboard` CTA للترقية.
 
 ## Channel limits foundation
 
