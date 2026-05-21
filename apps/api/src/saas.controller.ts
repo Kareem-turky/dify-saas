@@ -36,6 +36,7 @@ export class SaasController {
   @Post('admin/message-events/retry-failed') async retryFailedMessageEvents(@Body() body: { limit?: number }, @Headers('authorization') authorization?: string) { const admin = await this.saas.requireAdmin(authorization); return this.saas.retryFailedMessageEvents({ limit: body?.limit, actorUserId: admin.id }); }
   @Post('admin/approvals/:paymentId/approve') async approve(@Param('paymentId') paymentId: string, @Body() body: { notes?: string }, @Headers('authorization') authorization?: string) { const admin = await this.saas.requireAdmin(authorization); return this.saas.approvePayment(paymentId, body?.notes, admin.id); }
   @Get('provisioning/dify/status') difyStatus() { return this.difyGateway.getStatus(); }
+  @Get('billing/invoices/:invoiceId/receipt') invoiceReceipt(@Param('invoiceId') invoiceId: string) { return this.saas.getInvoiceReceipt(invoiceId); }
   @Get('provisioning/jobs') async jobs(@Headers('authorization') authorization?: string) { await this.saas.requireAdmin(authorization); return this.saas.listProvisioningJobs(); }
   @Post('provisioning/jobs/run-due') async runDueProvisioningJobs(@Headers('authorization') authorization?: string) { const admin = await this.saas.requireAdmin(authorization); return this.provisioning.runDueJobs(10, admin.id); }
   @Post('provisioning/jobs/:jobId/run') async runProvisioningJob(@Param('jobId') jobId: string, @Headers('authorization') authorization?: string) { const admin = await this.saas.requireAdmin(authorization); return this.provisioning.runJob(jobId, admin.id); }

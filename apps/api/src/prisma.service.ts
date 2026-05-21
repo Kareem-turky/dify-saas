@@ -52,6 +52,7 @@ export class PrismaService extends PrismaClient implements OnModuleInit, OnModul
     await this.provisioningJob.deleteMany();
     await this.approvalRequest.deleteMany();
     await this.paymentProof.deleteMany();
+    await this.invoice.deleteMany();
     await this.payment.deleteMany();
     await this.subscription.deleteMany();
     await this.user.deleteMany();

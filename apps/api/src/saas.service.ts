@@ -167,6 +167,14 @@ function trimTrailingSlash(value: string) {
   return value.replace(/\/+$/, '');
 }
 
+function todayInvoiceStamp() {
+  return new Date().toISOString().slice(0, 10).replace(/-/g, '');
+}
+
+function invoiceReceiptUrl(invoiceId: string) {
+  return `/billing/invoices/${invoiceId}/receipt`;
+}
+
 function publicUser<T extends { passwordHash?: string | null }>(user: T) {
   const { passwordHash: _passwordHash, ...safeUser } = user;
   return safeUser;
@@ -463,10 +471,25 @@ export class SaasService {
 
     const isUpgradeApproval = organization.status === 'active' && Boolean(organization.difyTenantId);
     const jobId = isUpgradeApproval ? null : id('job');
+    const invoiceId = id('inv');
     return this.db.$transaction(async tx => {
       const paidPayment = await tx.payment.update({ where: { id: payment.id }, data: { status: 'paid' } });
       const approvedRequest = await tx.approvalRequest.update({ where: { id: approval.id }, data: { status: 'approved', notes } });
       const activeSubscription = await tx.subscription.update({ where: { id: subscription.id }, data: { status: 'active' } });
+      const invoice = await tx.invoice.create({
+        data: {
+          id: invoiceId,
+          invoiceNumber: `INV-${todayInvoiceStamp()}-${payment.id.slice(-6).toUpperCase()}`,
+          organizationId: organization.id,
+          subscriptionId: subscription.id,
+          paymentId: payment.id,
+          amountEgp: payment.amountEgp,
+          currency: 'EGP',
+          status: 'paid',
+          paidAt: new Date(),
+          receiptUrl: invoiceReceiptUrl(invoiceId)
+        }
+      });
       const provisioningOrganization = isUpgradeApproval
         ? organization
         : await tx.organization.update({ where: { id: organization.id }, data: { status: 'provisioning' } });
@@ -488,15 +511,40 @@ export class SaasService {
           action: isUpgradeApproval ? 'plan_upgrade_approved' : 'payment_approved',
           targetType: 'payment',
           targetId: payment.id,
-          metadata: { approvalId: approval.id, provisioningJobId: jobId, notes: notes || null, subscriptionId: subscription.id }
+          metadata: { approvalId: approval.id, provisioningJobId: jobId, notes: notes || null, subscriptionId: subscription.id, invoiceId: invoice.id }
         }
       });
-      return { payment: paidPayment, approval: approvedRequest, subscription: activeSubscription, organization: provisioningOrganization, provisioningJob };
+      return { payment: paidPayment, approval: approvedRequest, subscription: activeSubscription, organization: provisioningOrganization, provisioningJob, invoice };
     });
   }
 
   listProvisioningJobs() {
     return this.db.provisioningJob.findMany({ orderBy: { createdAt: 'desc' }, include: { organization: true } });
+  }
+
+  async getInvoiceReceipt(invoiceId: string) {
+    const invoice = await this.db.invoice.findUnique({
+      where: { id: invoiceId },
+      include: { organization: true, payment: true, subscription: { include: { plan: true } } }
+    });
+    if (!invoice) throw new NotFoundException('Invoice not found');
+    return {
+      id: invoice.id,
+      invoiceNumber: invoice.invoiceNumber,
+      organizationId: invoice.organizationId,
+      organizationName: invoice.organization.name,
+      subscriptionId: invoice.subscriptionId,
+      planName: invoice.subscription.plan.name,
+      paymentId: invoice.paymentId,
+      paymentMethod: invoice.payment.method,
+      paymentReference: invoice.payment.reference,
+      amountEgp: invoice.amountEgp,
+      currency: invoice.currency,
+      status: invoice.status,
+      issuedAt: invoice.issuedAt,
+      paidAt: invoice.paidAt,
+      receiptUrl: invoice.receiptUrl || invoiceReceiptUrl(invoice.id)
+    };
   }
 
   listAuditLogs() {
@@ -1406,6 +1454,7 @@ export class SaasService {
     const payment = await this.db.payment.findFirst({ where: { organizationId }, orderBy: { createdAt: 'desc' } });
     const approval = await this.db.approvalRequest.findFirst({ where: { organizationId }, orderBy: { createdAt: 'desc' } });
     const provisioningJob = await this.db.provisioningJob.findFirst({ where: { organizationId }, orderBy: { createdAt: 'desc' } });
+    const latestInvoice = await this.db.invoice.findFirst({ where: { organizationId }, orderBy: { issuedAt: 'desc' } });
 
     const currentStep = organization.status === 'pending_payment'
       ? 'submit_payment'
@@ -1427,6 +1476,7 @@ export class SaasService {
       payment,
       approval,
       provisioningJob,
+      latestInvoice,
       currentStep,
       aiStudioUrl,
       usage,

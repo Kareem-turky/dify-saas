@@ -40,6 +40,7 @@ model Organization {
   channels      Channel[]
   messageEvents MessageEvent[]
   auditLogs     AuditLog[]
+  invoices      Invoice[]
   createdAt     DateTime           @default(now())
   updatedAt     DateTime           @updatedAt
 }
@@ -63,6 +64,7 @@ model Subscription {
   organization   Organization @relation(fields: [organizationId], references: [id])
   plan           Plan         @relation(fields: [planId], references: [id])
   payments       Payment[]
+  invoices       Invoice[]
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
 }
@@ -80,8 +82,32 @@ model Payment {
   subscription   Subscription      @relation(fields: [subscriptionId], references: [id])
   approvals      ApprovalRequest[]
   proofs         PaymentProof[]
+  invoice        Invoice?
   createdAt      DateTime          @default(now())
   updatedAt      DateTime          @updatedAt
+}
+
+
+model Invoice {
+  id             String       @id
+  invoiceNumber  String       @unique
+  organizationId String
+  subscriptionId String
+  paymentId      String       @unique
+  amountEgp      Int
+  currency       String       @default("EGP")
+  status         String
+  issuedAt       DateTime     @default(now())
+  paidAt         DateTime?
+  receiptUrl     String?
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  subscription   Subscription @relation(fields: [subscriptionId], references: [id])
+  payment        Payment      @relation(fields: [paymentId], references: [id])
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@index([organizationId, issuedAt])
+  @@index([subscriptionId])
 }
 
 model PaymentProof {
