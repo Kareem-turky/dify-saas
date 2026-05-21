@@ -4,47 +4,43 @@ import { mkdir, writeFile } from 'fs/promises';
 import path from 'path';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from './prisma.service';
+import { getRateLimitStore } from './rate-limit.store';
 
 const id = (prefix: string) => `${prefix}_${Math.random().toString(36).slice(2, 10)}`;
 const MAX_PAYMENT_PROOF_BYTES = 5 * 1024 * 1024;
 const ALLOWED_PAYMENT_PROOF_MIME_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'application/pdf']);
 
-type RateBucket = { count: number; resetAt: number };
-const loginRateBuckets = new Map<string, RateBucket>();
-const metaWebhookRateBuckets = new Map<string, RateBucket>();
 
 function envPositiveInt(name: string, fallback: number) {
   const configured = Number(process.env[name] || fallback);
   return Number.isFinite(configured) && configured > 0 ? Math.floor(configured) : fallback;
 }
 
-function checkFixedWindowRateLimit(input: { buckets: Map<string, RateBucket>; key: string; max: number; windowMs: number; message: string }) {
-  const now = Date.now();
-  const existing = input.buckets.get(input.key);
-  if (!existing || existing.resetAt <= now) {
-    input.buckets.set(input.key, { count: 1, resetAt: now + input.windowMs });
-    return;
-  }
-  if (existing.count >= input.max) {
+async function checkFixedWindowRateLimit(input: { namespace: string; key: string; max: number; windowMs: number; message: string }) {
+  const result = await getRateLimitStore().hit({ namespace: input.namespace, key: input.key, max: input.max, windowMs: input.windowMs });
+  if (!result.allowed) {
     throw new HttpException(input.message, HttpStatus.TOO_MANY_REQUESTS);
   }
-  existing.count += 1;
 }
 
-function checkLoginRateLimit(email?: string) {
-  checkFixedWindowRateLimit({
-    buckets: loginRateBuckets,
-    key: (email || 'unknown').toLowerCase(),
+function safeRateLimitKey(value?: string) {
+  return (value || 'unknown').toLowerCase().replace(/[^a-z0-9@._:-]/g, '_').slice(0, 160);
+}
+
+async function checkLoginRateLimit(email?: string) {
+  await checkFixedWindowRateLimit({
+    namespace: 'login',
+    key: safeRateLimitKey(email),
     max: envPositiveInt('LOGIN_RATE_LIMIT_MAX', 20),
     windowMs: envPositiveInt('LOGIN_RATE_LIMIT_WINDOW_MS', 60_000),
     message: 'Too many login attempts. Please wait and try again.'
   });
 }
 
-function checkMetaWebhookRateLimit(source?: string) {
-  checkFixedWindowRateLimit({
-    buckets: metaWebhookRateBuckets,
-    key: source?.split(',')[0]?.trim() || 'unknown',
+async function checkMetaWebhookRateLimit(source?: string) {
+  await checkFixedWindowRateLimit({
+    namespace: 'meta-webhook',
+    key: safeRateLimitKey(source?.split(',')[0]?.trim()),
     max: envPositiveInt('META_WEBHOOK_RATE_LIMIT_MAX', 200),
     windowMs: envPositiveInt('META_WEBHOOK_RATE_LIMIT_WINDOW_MS', 60_000),
     message: 'Too many Meta webhook requests. Please retry later.'
@@ -230,7 +226,7 @@ export class SaasService {
   }
 
   async login(input: { email: string; password: string }) {
-    checkLoginRateLimit(input.email);
+    await checkLoginRateLimit(input.email);
     const user = await this.db.user.findUnique({ where: { email: input.email.toLowerCase() } });
     if (!user || !verifyPassword(input.password, user.passwordHash)) throw new UnauthorizedException('Invalid email or password');
     if (user.role === 'admin') {
@@ -729,7 +725,7 @@ export class SaasService {
   }
 
   async receiveMetaWebhook(payload: unknown, signature?: string, rawBody?: Buffer, source?: string) {
-    checkMetaWebhookRateLimit(source);
+    await checkMetaWebhookRateLimit(source);
     verifyMetaWebhookSignature(payload, signature, rawBody);
     const statusCallbacks = this.extractWhatsappStatusCallbacks(payload);
     const statusesUpdated = await this.updateWhatsappStatusCallbacks(statusCallbacks);
