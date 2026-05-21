@@ -20,6 +20,8 @@ export class SaasController {
   }
   @Post('payments/manual-proof') submitManualPayment(@Body() body: Parameters<SaasService['submitManualPayment']>[0]) { return this.saas.submitManualPayment(body); }
   @Post('subscriptions/upgrade') requestPlanUpgrade(@Body() body: Parameters<SaasService['requestPlanUpgrade']>[1], @Headers('authorization') authorization?: string) { return this.saas.requestPlanUpgrade(authorization, body); }
+  @Get('team/members') listTeamMembers(@Headers('authorization') authorization?: string) { return this.saas.listTeamMembers(authorization); }
+  @Post('team/members') addTeamMember(@Body() body: Parameters<SaasService['addTeamMember']>[1], @Headers('authorization') authorization?: string) { return this.saas.addTeamMember(authorization, body); }
   @Get('channels/whatsapp') getWhatsappChannel(@Headers('authorization') authorization?: string) { return this.saas.getWhatsappChannel(authorization); }
   @Put('channels/whatsapp') saveWhatsappChannel(@Body() body: Parameters<SaasService['saveWhatsappChannel']>[1], @Headers('authorization') authorization?: string) { return this.saas.saveWhatsappChannel(authorization, body); }
   @Get('channels/messenger') getMessengerChannel(@Headers('authorization') authorization?: string) { return this.saas.getMessengerChannel(authorization); }

@@ -261,6 +261,64 @@ export class SaasService {
     return user;
   }
 
+
+  private async getActivePlanForOrganization(organizationId: string) {
+    const subscription = await this.db.subscription.findFirst({
+      where: { organizationId, status: 'active' },
+      orderBy: { createdAt: 'desc' },
+      include: { plan: true }
+    });
+    if (!subscription) throw new BadRequestException('Active subscription is required before managing team members');
+    return subscription.plan;
+  }
+
+  async listTeamMembers(authorization?: string) {
+    const user = await this.requireUser(authorization);
+    if (!user.organizationId) throw new ForbiddenException('Organization is required');
+    const plan = await this.getActivePlanForOrganization(user.organizationId);
+    const members = await this.db.user.findMany({
+      where: { organizationId: user.organizationId },
+      orderBy: [{ createdAt: 'asc' }, { email: 'asc' }]
+    });
+    return { seatLimit: plan.seatLimit, seatsUsed: members.length, seatsRemaining: Math.max(plan.seatLimit - members.length, 0), members: members.map(publicUser) };
+  }
+
+  async addTeamMember(authorization: string | undefined, input: { name?: string; email?: string; role?: string; preferredLanguage?: 'ar' | 'en' }) {
+    const user = await this.requireUser(authorization);
+    if (!user.organizationId) throw new ForbiddenException('Organization is required');
+    const organization = await this.db.organization.findUnique({ where: { id: user.organizationId } });
+    if (!organization) throw new NotFoundException('Organization not found');
+    if (organization.ownerUserId !== user.id && user.role !== 'admin') throw new ForbiddenException('Only the organization owner can add team members');
+
+    const email = input.email?.trim().toLowerCase();
+    const name = input.name?.trim();
+    if (!name || !email) throw new BadRequestException('name and email are required');
+    if (!/^\S+@\S+\.\S+$/.test(email)) throw new BadRequestException('A valid email is required');
+
+    const existingUser = await this.db.user.findUnique({ where: { email } });
+    if (existingUser) throw new ConflictException('A user with this email already exists');
+
+    const plan = await this.getActivePlanForOrganization(user.organizationId);
+    const seatsUsed = await this.db.user.count({ where: { organizationId: user.organizationId } });
+    if (seatsUsed >= plan.seatLimit) throw new ConflictException('Seat limit reached for the active plan');
+
+    const role = ['member', 'manager'].includes(input.role || '') ? input.role! : 'member';
+    const member = await this.db.user.create({
+      data: { id: id('usr'), name, email, role, preferredLanguage: input.preferredLanguage || 'ar', organizationId: user.organizationId }
+    });
+    await this.recordAuditLog({
+      actorUserId: user.id,
+      organizationId: user.organizationId,
+      action: 'team_member_added',
+      targetType: 'user',
+      targetId: member.id,
+      metadata: { email: member.email, role: member.role }
+    });
+
+    const nextSeatsUsed = seatsUsed + 1;
+    return { member: publicUser(member), seatLimit: plan.seatLimit, seatsUsed: nextSeatsUsed, seatsRemaining: Math.max(plan.seatLimit - nextSeatsUsed, 0) };
+  }
+
   async submitManualPayment(input: { organizationId: string; method: 'instapay' | 'vodafone_cash' | 'bank_transfer'; amountEgp: number; reference?: string; proofUrl?: string; proofUploadId?: string }) {
     const organization = await this.db.organization.findUnique({ where: { id: input.organizationId } });
     if (!organization) throw new NotFoundException('Organization not found');

@@ -79,6 +79,7 @@ export default function DashboardPage(){
         <div className="cta">
           {summary.currentStep === 'submit_payment' && <a className="btn" href={`/payment?organizationId=${summary.organization.id}`}>سجل إثبات الدفع</a>}
           {summary.aiStudioUrl && <a className="btn" href={summary.aiStudioUrl} target="_blank">Open AI Studio</a>}
+          <a className="btn secondary" href="/team">Manage team</a>
         </div>
       </div>
 
