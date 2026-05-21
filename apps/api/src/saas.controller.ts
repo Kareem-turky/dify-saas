@@ -28,6 +28,7 @@ export class SaasController {
   @Post('webhooks/meta') receiveMetaWebhook(@Body() body: unknown, @Headers('x-hub-signature-256') signature?: string, @Req() request?: { rawBody?: Buffer }) { return this.saas.receiveMetaWebhook(body, signature, request?.rawBody); }
   @Get('admin/approvals') async listApprovals(@Headers('authorization') authorization?: string) { await this.saas.requireAdmin(authorization); return this.saas.listApprovals(); }
   @Get('admin/audit-logs') async listAuditLogs(@Headers('authorization') authorization?: string) { await this.saas.requireAdmin(authorization); return this.saas.listAuditLogs(); }
+  @Get('admin/message-events/summary') async messageEventSummary(@Headers('authorization') authorization?: string) { await this.saas.requireAdmin(authorization); return this.saas.getMessageEventSummary(); }
   @Post('admin/message-events/retry-failed') async retryFailedMessageEvents(@Body() body: { limit?: number }, @Headers('authorization') authorization?: string) { const admin = await this.saas.requireAdmin(authorization); return this.saas.retryFailedMessageEvents({ limit: body?.limit, actorUserId: admin.id }); }
   @Post('admin/approvals/:paymentId/approve') async approve(@Param('paymentId') paymentId: string, @Body() body: { notes?: string }, @Headers('authorization') authorization?: string) { const admin = await this.saas.requireAdmin(authorization); return this.saas.approvePayment(paymentId, body?.notes, admin.id); }
   @Get('provisioning/dify/status') difyStatus() { return this.difyGateway.getStatus(); }

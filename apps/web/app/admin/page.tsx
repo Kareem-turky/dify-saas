@@ -32,6 +32,14 @@ type DifyStatus = {
   requiresExistingDifyOwnerAccount: boolean;
 };
 
+type MessageEventSummary = {
+  totals: Record<string, number>;
+  byChannel: Record<string, Record<string, number>>;
+  retryableFailed: number;
+  deadLettered: number;
+  oldestFailedAt?: string | null;
+};
+
 type AuditLogRow = {
   id: string;
   actorUserId?: string | null;
@@ -49,6 +57,7 @@ export default function AdminPage(){
   const [rows, setRows] = useState<ApprovalRow[]>([]);
   const [jobs, setJobs] = useState<ProvisioningJobRow[]>([]);
   const [auditLogs, setAuditLogs] = useState<AuditLogRow[]>([]);
+  const [messageSummary, setMessageSummary] = useState<MessageEventSummary | null>(null);
   const [difyStatus, setDifyStatus] = useState<DifyStatus | null>(null);
   const [message, setMessage] = useState('');
   const [adminEmail, setAdminEmail] = useState('');
@@ -79,6 +88,12 @@ export default function AdminPage(){
     setAuditLogs(await response.json());
   }
 
+  async function loadMessageSummary(){
+    const response = await fetch(`${API_BASE}/admin/message-events/summary`, { headers: { Authorization: `Bearer ${adminToken}` } });
+    if (!response.ok) throw new Error('تعذر تحميل message queue summary.');
+    setMessageSummary(await response.json());
+  }
+
   async function refreshAll(){
     if (!adminToken) {
       setMessage('سجل دخول الأدمن الأول.');
@@ -86,7 +101,7 @@ export default function AdminPage(){
     }
     setMessage('جاري تحميل لوحة الأدمن...');
     try {
-      await Promise.all([loadApprovals(), loadJobs(), loadDifyStatus(), loadAuditLogs()]);
+      await Promise.all([loadApprovals(), loadJobs(), loadDifyStatus(), loadAuditLogs(), loadMessageSummary()]);
       setMessage('');
     } catch (error) {
       setMessage(error instanceof Error ? error.message : 'حصل خطأ أثناء تحميل لوحة الأدمن');
@@ -152,7 +167,7 @@ export default function AdminPage(){
       await refreshAll();
       return;
     }
-    setMessage(`تمت محاولة ${data.attempted || 0} رسالة: ${data.retried || 0} نجحت، ${data.failed || 0} فشلت.`);
+    setMessage(`تمت محاولة ${data.attempted || 0} رسالة: ${data.retried || 0} نجحت، ${data.failed || 0} فشلت، ${data.skippedNotDue || 0} مؤجلة، ${data.deadLettered || 0} dead-letter.`);
     await refreshAll();
   }
 
@@ -198,7 +213,7 @@ export default function AdminPage(){
       <div className="item"><h3>Open approvals</h3><p>{openApprovals.length} طلب محتاج مراجعة.</p></div>
       <div className="item"><h3>Runnable jobs</h3><p>{runnableJobs.length} job جاهز للتشغيل أو retry.</p></div>
       <div className="item"><h3>Total provisioning</h3><p>{jobs.length} job في النظام.</p></div>
-      <div className="item"><h3>Message retries</h3><p>Retry failed WhatsApp/Dify replies.</p><button className="btn secondary" onClick={retryFailedMessages} disabled={!adminToken}>Retry failed messages</button></div>
+      <div className="item"><h3>Message retries</h3><p>{messageSummary?.retryableFailed ?? 0} retryable · {messageSummary?.deadLettered ?? 0} dead-letter.</p><button className="btn secondary" onClick={retryFailedMessages} disabled={!adminToken}>Retry failed messages</button></div>
     </div>
 
     <section style={{marginTop: 32}}>
@@ -245,10 +260,14 @@ export default function AdminPage(){
     </section>
 
     <section style={{marginTop: 32}}>
-      <h2>WhatsApp/Dify message retries</h2>
+      <h2>Channel message queue monitoring</h2>
       <div className="item">
-        <p>يعيد تشغيل inbound message events التي فشل إرسال رد Dify/WhatsApp لها، بدون إعادة معالجة duplicates من Meta.</p>
-        <button className="btn" onClick={retryFailedMessages} disabled={!adminToken}>Retry failed messages</button>
+        <p>يراقب failed/retryable/dead-letter inbound events لقنوات WhatsApp وMessenger قبل hardening الإنتاج.</p>
+        <p>Retryable failed: <strong>{messageSummary?.retryableFailed ?? 0}</strong> · Dead-letter: <strong>{messageSummary?.deadLettered ?? 0}</strong></p>
+        {messageSummary?.oldestFailedAt && <p>Oldest failed: {new Date(messageSummary.oldestFailedAt).toLocaleString()}</p>}
+        <p>WhatsApp: {JSON.stringify(messageSummary?.byChannel?.whatsapp || {})}</p>
+        <p>Messenger: {JSON.stringify(messageSummary?.byChannel?.messenger || {})}</p>
+        <button className="btn" onClick={retryFailedMessages} disabled={!adminToken}>Retry due failed messages</button>
       </div>
     </section>
 

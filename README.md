@@ -529,6 +529,32 @@ POST /webhooks/meta
 
 Phase 4 Messenger functional slice مكتملة حالياً: channel settings + webhook verification + inbound extraction + Dify reply dispatch + Send API + idempotency + failed-message retry + delivery/read callbacks.
 
+## Phase 4 production hardening — message queue monitoring/dead-letter
+
+تمت إضافة أول hardening slice لقنوات WhatsApp/Messenger قبل الإنتاج:
+
+```text
+GET /admin/message-events/summary
+Authorization: Bearer ***
+```
+
+يعرض summary تشغيلي للرسائل حسب الحالة والقناة:
+
+```text
+totals
+byChannel
+retryableFailed
+deadLettered
+oldestFailedAt
+```
+
+وتم تحسين:
+
+- `POST /admin/message-events/retry-failed` لا يعيد محاولة events مؤجلة قبل `nextRetryAt`.
+- الرسائل التي وصلت حد `MESSAGE_EVENT_MAX_RETRIES`، والـ default = `3`، تتحول إلى `dead` بدل retry لا نهائي.
+- رد الـ retry أصبح يرجع `skippedNotDue` و `deadLettered` عند وجودهم.
+- صفحة `/admin` تعرض monitoring summary لقوائم WhatsApp/Messenger مع retryable/dead-letter counts.
+
 ## Meta webhook signature verification
 
 تمت إضافة أول جزء من production hardening لقنوات Meta:

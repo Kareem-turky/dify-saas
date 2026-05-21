@@ -9,6 +9,11 @@ const id = (prefix: string) => `${prefix}_${Math.random().toString(36).slice(2, 
 const MAX_PAYMENT_PROOF_BYTES = 5 * 1024 * 1024;
 const ALLOWED_PAYMENT_PROOF_MIME_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'application/pdf']);
 
+function messageEventMaxRetries() {
+  const configured = Number(process.env.MESSAGE_EVENT_MAX_RETRIES || 3);
+  return Number.isFinite(configured) && configured > 0 ? Math.floor(configured) : 3;
+}
+
 function safeFileName(value: string) {
   return value.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 120) || 'payment-proof';
 }
@@ -600,7 +605,7 @@ export class SaasService {
       } catch (error) {
         repliesFailed += 1;
         const lastError = sanitizeIntegrationError(error);
-        await this.db.messageEvent.update({ where: { id: inboundEvent.id }, data: { status: 'failed', lastError, nextRetryAt: new Date(Date.now() + 60_000) } });
+        await this.db.messageEvent.update({ where: { id: inboundEvent.id }, data: { status: 'failed', lastError, nextRetryAt: new Date() } });
         await this.db.channel.update({ where: { id: channel.id }, data: { lastError } });
       }
     }
@@ -642,7 +647,7 @@ export class SaasService {
       } catch (error) {
         messengerRepliesFailed += 1;
         const lastError = sanitizeIntegrationError(error);
-        await this.db.messageEvent.update({ where: { id: inboundEvent.id }, data: { status: 'failed', lastError, nextRetryAt: new Date(Date.now() + 60_000) } });
+        await this.db.messageEvent.update({ where: { id: inboundEvent.id }, data: { status: 'failed', lastError, nextRetryAt: new Date() } });
         await this.db.channel.update({ where: { id: channel.id }, data: { lastError } });
       }
     }
@@ -706,6 +711,8 @@ export class SaasService {
 
   async retryFailedMessageEvents(input: { limit?: number; actorUserId?: string }) {
     const limit = Math.min(Math.max(input.limit || 10, 1), 50);
+    const now = new Date();
+    const maxRetries = messageEventMaxRetries();
     const failedEvents = await this.db.messageEvent.findMany({
       where: {
         direction: 'inbound',
@@ -717,10 +724,24 @@ export class SaasService {
       include: { channel: true }
     });
 
+    let attempted = 0;
     let retried = 0;
     let failed = 0;
+    let skippedNotDue = 0;
+    let deadLettered = 0;
 
     for (const event of failedEvents) {
+      if (event.retryCount >= maxRetries) {
+        deadLettered += 1;
+        await this.db.messageEvent.update({ where: { id: event.id }, data: { status: 'dead' } });
+        continue;
+      }
+      if (event.nextRetryAt && event.nextRetryAt > now) {
+        skippedNotDue += 1;
+        continue;
+      }
+
+      attempted += 1;
       const nextRetryCount = event.retryCount + 1;
       await this.db.messageEvent.update({ where: { id: event.id }, data: { retryCount: nextRetryCount, status: 'retrying' } });
       try {
@@ -739,16 +760,18 @@ export class SaasService {
           failed += 1;
           await this.db.messageEvent.update({
             where: { id: event.id },
-            data: { status: 'failed', lastError: 'Retry skipped because the message is not dispatchable', retryCount: nextRetryCount, nextRetryAt: new Date(Date.now() + 5 * 60_000) }
+            data: { status: nextRetryCount >= maxRetries ? 'dead' : 'failed', lastError: 'Retry skipped because the message is not dispatchable', retryCount: nextRetryCount, nextRetryAt: nextRetryCount >= maxRetries ? null : new Date(Date.now() + 5 * 60_000) }
           });
+          if (nextRetryCount >= maxRetries) deadLettered += 1;
         }
       } catch (error) {
         failed += 1;
         const lastError = sanitizeIntegrationError(error);
         await this.db.messageEvent.update({
           where: { id: event.id },
-          data: { status: 'failed', lastError, retryCount: nextRetryCount, nextRetryAt: new Date(Date.now() + 5 * 60_000) }
+          data: { status: nextRetryCount >= maxRetries ? 'dead' : 'failed', lastError, retryCount: nextRetryCount, nextRetryAt: nextRetryCount >= maxRetries ? null : new Date(Date.now() + 5 * 60_000) }
         });
+        if (nextRetryCount >= maxRetries) deadLettered += 1;
         await this.db.channel.update({ where: { id: event.channelId }, data: { lastError } });
       }
     }
@@ -758,11 +781,36 @@ export class SaasService {
         actorUserId: input.actorUserId,
         action: 'message_retry_run',
         targetType: 'message_event',
-        metadata: { attempted: failedEvents.length, retried, failed }
+        metadata: { attempted, retried, failed, skippedNotDue, deadLettered, maxRetries }
       });
     }
 
-    return { attempted: failedEvents.length, retried, failed };
+    return { attempted, retried, failed, ...(skippedNotDue ? { skippedNotDue } : {}), ...(deadLettered ? { deadLettered } : {}) };
+  }
+
+  async getMessageEventSummary() {
+    const events = await this.db.messageEvent.findMany({
+      select: { channelType: true, status: true, direction: true, nextRetryAt: true, createdAt: true }
+    });
+    const totals: Record<string, number> = {};
+    const byChannel: Record<string, Record<string, number>> = {};
+    let retryableFailed = 0;
+    let deadLettered = 0;
+    let oldestFailedAt: Date | null = null;
+    const now = new Date();
+
+    for (const event of events) {
+      totals[event.status] = (totals[event.status] || 0) + 1;
+      byChannel[event.channelType] = byChannel[event.channelType] || {};
+      byChannel[event.channelType][event.status] = (byChannel[event.channelType][event.status] || 0) + 1;
+      if (event.status === 'failed' && event.direction === 'inbound') {
+        if (!event.nextRetryAt || event.nextRetryAt <= now) retryableFailed += 1;
+        if (!oldestFailedAt || event.createdAt < oldestFailedAt) oldestFailedAt = event.createdAt;
+      }
+      if (event.status === 'dead') deadLettered += 1;
+    }
+
+    return { totals, byChannel, retryableFailed, deadLettered, oldestFailedAt: oldestFailedAt?.toISOString() ?? null };
   }
 
   private publicMessageEvent(event: { id: string; organizationId: string; channelId: string; channelType: string; direction: string; eventId: string; fromId?: string | null; toId?: string | null; messageType?: string | null; textBody?: string | null; status: string; lastError?: string | null; retryCount: number; nextRetryAt?: Date | null; createdAt: Date; updatedAt: Date }) {
