@@ -215,8 +215,8 @@ export default function AdminPage(){
   const runnableJobs = jobs.filter(job => job.status === 'queued' || job.status === 'failed');
 
   return <main className="shell">
-    <h1>Internal Admin</h1>
-    <p>مراجعة المدفوعات اليدوية وتشغيل Dify provisioning حسب ملف الخطة.</p>
+    <div className="section-title"><span>Ops command center</span><span className="status-pill good">admin console</span></div>
+    <p>مراجعة المدفوعات اليدوية، تشغيل Dify provisioning، متابعة readiness، audit logs، وmessage retries من شاشة واحدة.</p>
     <div className="item" style={{marginTop: 20}}>
       <h2>Admin login</h2>
       <input className="input" type="email" value={adminEmail} onChange={event => setAdminEmail(event.target.value)} placeholder="Admin email" />
@@ -230,19 +230,19 @@ export default function AdminPage(){
     {message && <p>{message}</p>}
 
     <div className="grid">
-      <div className="item"><h3>Open approvals</h3><p>{openApprovals.length} طلب محتاج مراجعة.</p></div>
-      <div className="item"><h3>Runnable jobs</h3><p>{runnableJobs.length} job جاهز للتشغيل أو retry.</p></div>
-      <div className="item"><h3>Total provisioning</h3><p>{jobs.length} job في النظام.</p></div>
-      <div className="item"><h3>Message retries</h3><p>{messageSummary?.retryableFailed ?? 0} retryable · {messageSummary?.deadLettered ?? 0} dead-letter.</p><button className="btn secondary" onClick={retryFailedMessages} disabled={!adminToken}>Retry failed messages</button></div>
+      <div className="item metric"><h3>Open approvals</h3><p>{openApprovals.length} طلب محتاج مراجعة.</p></div>
+      <div className="item metric"><h3>Runnable jobs</h3><p>{runnableJobs.length} job جاهز للتشغيل أو retry.</p></div>
+      <div className="item metric"><h3>Total provisioning</h3><p>{jobs.length} job في النظام.</p></div>
+      <div className="item metric"><h3>Message retries</h3><p>{messageSummary?.retryableFailed ?? 0} retryable · {messageSummary?.deadLettered ?? 0} dead-letter.</p><button className="btn secondary" onClick={retryFailedMessages} disabled={!adminToken}>Retry failed messages</button></div>
     </div>
 
     <section style={{marginTop: 32}}>
-      <h2>Production readiness</h2>
+      <div className="section-title"><span>Production readiness</span><span className={readiness?.ok ? 'status-pill good' : 'status-pill warn'}>{readiness?.ok ? 'ready' : 'needs review'}</span></div>
       <div className="grid">
-        <div className="item"><strong>Overall</strong><p>{readiness ? (readiness.ok ? 'Ready' : 'Needs attention') : 'Not loaded'}</p></div>
-        <div className="item"><strong>Database</strong><p>{readiness ? `${readiness.checks.database.ok ? 'OK' : 'Fail'} · ${readiness.checks.database.latencyMs}ms` : 'Not loaded'}</p></div>
-        <div className="item"><strong>Admin/Auth</strong><p>{readiness ? `admin ${readiness.checks.adminUser.ok ? 'OK' : 'missing'} · secret ${readiness.checks.authTokenSecret.configured ? 'configured' : 'missing'}` : 'Not loaded'}</p></div>
-        <div className="item"><strong>Storage/Worker</strong><p>{readiness ? `proof storage ${readiness.checks.paymentProofStorage.ok ? 'OK' : 'fail'} · worker ${readiness.checks.provisioningWorker.enabled ? 'enabled' : 'disabled'}${readiness.checks.provisioningWorker.running ? ' · running' : ''}` : 'Not loaded'}</p></div>
+        <div className="item metric"><strong>Overall</strong><p>{readiness ? (readiness.ok ? 'Ready' : 'Needs attention') : 'Not loaded'}</p></div>
+        <div className="item metric"><strong>Database</strong><p>{readiness ? `${readiness.checks.database.ok ? 'OK' : 'Fail'} · ${readiness.checks.database.latencyMs}ms` : 'Not loaded'}</p></div>
+        <div className="item metric"><strong>Admin/Auth</strong><p>{readiness ? `admin ${readiness.checks.adminUser.ok ? 'OK' : 'missing'} · secret ${readiness.checks.authTokenSecret.configured ? 'configured' : 'missing'}` : 'Not loaded'}</p></div>
+        <div className="item metric"><strong>Storage/Worker</strong><p>{readiness ? `proof storage ${readiness.checks.paymentProofStorage.ok ? 'OK' : 'fail'} · worker ${readiness.checks.provisioningWorker.enabled ? 'enabled' : 'disabled'}${readiness.checks.provisioningWorker.running ? ' · running' : ''}` : 'Not loaded'}</p></div>
       </div>
     </section>
 
