@@ -6,7 +6,9 @@
   "scripts": {
     "test": "pnpm -r test",
     "build": "pnpm -r build",
-    "typecheck": "pnpm -r typecheck"
+    "typecheck": "pnpm -r typecheck",
+    "backup:sqlite": "bash scripts/backup-sqlite.sh",
+    "restore:sqlite": "bash scripts/restore-sqlite.sh"
   },
   "devDependencies": {
     "typescript": "^5.9.3"
