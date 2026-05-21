@@ -3,10 +3,11 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
 import { DifyProvisioningGateway, DifyProvisioningService } from './dify-provisioning.service';
 import { SaasService } from './saas.service';
+import { ProvisioningWorkerService } from './provisioning-worker.service';
 
 @Controller()
 export class SaasController {
-  constructor(private readonly saas: SaasService, private readonly provisioning: DifyProvisioningService, private readonly difyGateway: DifyProvisioningGateway) {}
+  constructor(private readonly saas: SaasService, private readonly provisioning: DifyProvisioningService, private readonly difyGateway: DifyProvisioningGateway, private readonly provisioningWorker: ProvisioningWorkerService) {}
 
   @Get('health') health() { return { ok: true, service: 'dify-saas-api' }; }
   @Get('plans') listPlans() { return this.saas.listPlans(); }

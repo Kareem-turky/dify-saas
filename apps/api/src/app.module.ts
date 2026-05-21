@@ -3,6 +3,7 @@ import { DifyProvisioningGateway, DifyProvisioningService } from './dify-provisi
 import { PrismaService } from './prisma.service';
 import { SaasController } from './saas.controller';
 import { SaasService } from './saas.service';
+import { ProvisioningWorkerService } from './provisioning-worker.service';
 
-@Module({ controllers: [SaasController], providers: [PrismaService, SaasService, DifyProvisioningGateway, DifyProvisioningService] })
+@Module({ controllers: [SaasController], providers: [PrismaService, SaasService, DifyProvisioningGateway, DifyProvisioningService, ProvisioningWorkerService] })
 export class AppModule {}
