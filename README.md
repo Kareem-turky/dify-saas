@@ -574,6 +574,29 @@ META_WEBHOOK_RATE_LIMIT_WINDOW_MS=60000
 
 ملاحظة: التنفيذ الحالي in-memory مناسب كبداية/dev أو instance واحدة. في الإنتاج متعدد النسخ يجب نقله إلى Redis/shared store.
 
+## Usage limits foundation
+
+تمت إضافة أول slice من usage limits حسب الباقات:
+
+- Dashboard API يرجع الآن `usage` لكل organization:
+
+```text
+messagesUsed
+messageLimit
+messagesRemaining
+limitReached
+windowStart
+windowEnd
+```
+
+- حساب الاستهلاك الحالي يعتمد على outbound message events الناجحة داخل الشهر الحالي.
+- عند وصول `messagesUsed` إلى `plan.messageLimit`:
+  - يستقبل الـ webhook الرسالة ويحفظها كـ inbound event.
+  - يتم وضع status = `usage_limited`.
+  - لا يتم استدعاء Dify App API ولا Meta Send API.
+  - response يحتوي `usageLimited` عند حدوث ذلك.
+- صفحة `/dashboard` تعرض استخدام الرسائل الحالي وحد الباقة.
+
 ## Meta webhook signature verification
 
 تمت إضافة أول جزء من production hardening لقنوات Meta:

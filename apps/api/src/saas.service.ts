@@ -611,6 +611,7 @@ export class SaasService {
     let repliesFailed = 0;
     let messengerRepliesSent = 0;
     let messengerRepliesFailed = 0;
+    let usageLimited = 0;
 
     for (const item of messages) {
       const channel = await this.db.channel.findFirst({ where: { channelType: 'whatsapp', phoneNumberId: item.phoneNumberId, status: 'configured' } });
@@ -642,6 +643,13 @@ export class SaasService {
         }
       });
       processed += 1;
+
+      const usage = await this.getOrganizationUsage(channel.organizationId);
+      if (usage.limitReached) {
+        usageLimited += 1;
+        await this.markUsageLimited(inboundEvent.id);
+        continue;
+      }
 
       try {
         const replyStatus = await this.processInboundWhatsappMessage(channel, inboundEvent, item);
@@ -685,6 +693,13 @@ export class SaasService {
       });
       processed += 1;
 
+      const usage = await this.getOrganizationUsage(channel.organizationId);
+      if (usage.limitReached) {
+        usageLimited += 1;
+        await this.markUsageLimited(inboundEvent.id);
+        continue;
+      }
+
       try {
         const replyStatus = await this.processInboundMessengerMessage(channel, inboundEvent, item);
         if (replyStatus === 'sent') messengerRepliesSent += 1;
@@ -696,7 +711,7 @@ export class SaasService {
       }
     }
 
-    return { received: true, processed, duplicates, ...(ignored ? { ignored } : {}), ...(statusesUpdated ? { statusesUpdated } : {}), ...(messengerStatusesUpdated ? { messengerStatusesUpdated } : {}), ...(repliesSent ? { repliesSent } : {}), ...(repliesFailed ? { repliesFailed } : {}), ...(messengerRepliesSent ? { messengerRepliesSent } : {}), ...(messengerRepliesFailed ? { messengerRepliesFailed } : {}) };
+    return { received: true, processed, duplicates, ...(ignored ? { ignored } : {}), ...(statusesUpdated ? { statusesUpdated } : {}), ...(messengerStatusesUpdated ? { messengerStatusesUpdated } : {}), ...(repliesSent ? { repliesSent } : {}), ...(repliesFailed ? { repliesFailed } : {}), ...(messengerRepliesSent ? { messengerRepliesSent } : {}), ...(messengerRepliesFailed ? { messengerRepliesFailed } : {}), ...(usageLimited ? { usageLimited } : {}) };
   }
 
   async sendWhatsappTestMessage(authorization: string | undefined, input: { to?: string; text?: string }) {
@@ -751,6 +766,44 @@ export class SaasService {
       await this.db.channel.update({ where: { id: channel.id }, data: { lastError } });
       throw new InternalServerErrorException(lastError);
     }
+  }
+
+  private currentUsageWindow() {
+    const now = new Date();
+    return { start: new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)), end: new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1)) };
+  }
+
+  private async getOrganizationUsage(organizationId: string) {
+    const subscription = await this.db.subscription.findFirst({
+      where: { organizationId },
+      orderBy: { createdAt: 'desc' },
+      include: { plan: true }
+    });
+    const window = this.currentUsageWindow();
+    const messagesUsed = await this.db.messageEvent.count({
+      where: {
+        organizationId,
+        direction: 'outbound',
+        status: { in: ['sent', 'delivered', 'read'] },
+        createdAt: { gte: window.start, lt: window.end }
+      }
+    });
+    const messageLimit = subscription?.plan?.messageLimit ?? 0;
+    return {
+      windowStart: window.start.toISOString(),
+      windowEnd: window.end.toISOString(),
+      messagesUsed,
+      messageLimit,
+      messagesRemaining: Math.max(messageLimit - messagesUsed, 0),
+      limitReached: messageLimit > 0 && messagesUsed >= messageLimit
+    };
+  }
+
+  private async markUsageLimited(eventId: string) {
+    await this.db.messageEvent.update({
+      where: { id: eventId },
+      data: { status: 'usage_limited', lastError: 'Monthly message limit reached', nextRetryAt: null }
+    });
   }
 
   async retryFailedMessageEvents(input: { limit?: number; actorUserId?: string }) {
@@ -1195,6 +1248,7 @@ export class SaasService {
             : 'contact_support';
 
     const aiStudioUrl = buildAiStudioUrl(organization);
+    const usage = await this.getOrganizationUsage(organizationId);
 
     return {
       organization,
@@ -1204,7 +1258,8 @@ export class SaasService {
       approval,
       provisioningJob,
       currentStep,
-      aiStudioUrl
+      aiStudioUrl,
+      usage
     };
   }
 }
