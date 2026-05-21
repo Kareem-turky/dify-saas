@@ -467,6 +467,7 @@ export class SaasService {
     const user = await this.requireUser(authorization);
     if (!user.organizationId) throw new ForbiddenException('Organization is required');
     const existingChannel = await this.db.channel.findUnique({ where: { organizationId_channelType: { organizationId: user.organizationId, channelType: 'messenger' } } });
+    if (!existingChannel) await this.assertChannelLimitAllowsCreate(user.organizationId, 'messenger');
     if (!input.pageId || !input.verifyToken || (!input.pageAccessToken && !existingChannel?.accessTokenHash)) {
       throw new BadRequestException('pageId, pageAccessToken and verifyToken are required');
     }
@@ -528,6 +529,7 @@ export class SaasService {
     const user = await this.requireUser(authorization);
     if (!user.organizationId) throw new ForbiddenException('Organization is required');
     const existingChannel = await this.db.channel.findUnique({ where: { organizationId_channelType: { organizationId: user.organizationId, channelType: 'whatsapp' } } });
+    if (!existingChannel) await this.assertChannelLimitAllowsCreate(user.organizationId, 'whatsapp');
     if (!input.phoneNumberId || !input.wabaId || !input.verifyToken || (!input.accessToken && !existingChannel?.accessTokenHash)) {
       throw new BadRequestException('phoneNumberId, wabaId, accessToken and verifyToken are required');
     }
@@ -583,6 +585,21 @@ export class SaasService {
     });
 
     return this.publicChannel(channel);
+  }
+
+  private async assertChannelLimitAllowsCreate(organizationId: string, channelType: 'whatsapp' | 'messenger') {
+    const subscription = await this.db.subscription.findFirst({
+      where: { organizationId },
+      orderBy: { createdAt: 'desc' },
+      include: { plan: true }
+    });
+    const channelLimit = subscription?.plan?.channelLimit ?? 0;
+    if (channelLimit <= 0) return;
+
+    const configuredChannels = await this.db.channel.count({ where: { organizationId, status: 'configured' } });
+    if (configuredChannels >= channelLimit) {
+      throw new ForbiddenException(`Channel limit reached for current plan (${channelLimit}). Upgrade your plan to add ${channelType}.`);
+    }
   }
 
   async verifyMetaWebhook(query: { 'hub.mode'?: string; 'hub.verify_token'?: string; 'hub.challenge'?: string }) {

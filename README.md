@@ -597,6 +597,19 @@ windowEnd
   - response يحتوي `usageLimited` عند حدوث ذلك.
 - صفحة `/dashboard` تعرض استخدام الرسائل الحالي وحد الباقة.
 
+## Channel limits foundation
+
+تمت إضافة slice جديدة من limits حسب الباقة لقنوات Meta:
+
+- عند إنشاء قناة WhatsApp أو Messenger جديدة يتم حساب عدد القنوات `configured` للـ organization.
+- لو العدد الحالي وصل إلى `plan.channelLimit`:
+  - يرجع API status `403`.
+  - لا يتم إنشاء القناة الجديدة.
+  - تظهر رسالة `Channel limit reached` لتوجيه العميل لترقية الباقة.
+- تحديث قناة موجودة من نفس النوع لا يستهلك slot إضافي ويظل مسموحًا.
+
+هذا يكمل أول enforcement عملي لـ `channelLimit` بجانب `messageLimit`.
+
 ## Meta webhook signature verification
 
 تمت إضافة أول جزء من production hardening لقنوات Meta:
