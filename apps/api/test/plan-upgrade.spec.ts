@@ -80,4 +80,29 @@ describe('Plan upgrade requests', () => {
       .send({ planId: 'starter', method: 'instapay', amountEgp: 1500, reference: 'NO-DOWNGRADE' })
       .expect(400);
   });
+
+  it('prevents duplicate pending upgrade requests for the same target plan', async () => {
+    const customer = await createActiveStarterCustomer(app, adminToken);
+
+    const firstUpgrade = await request(app.getHttpServer())
+      .post('/subscriptions/upgrade')
+      .set('Authorization', `Bearer ${customer.token}`)
+      .send({ planId: 'growth', method: 'instapay', amountEgp: 3500, reference: 'UP-GROWTH-FIRST', proofUrl: 's3://proofs/upgrade-growth-first.jpg' })
+      .expect(201);
+
+    const duplicateUpgrade = await request(app.getHttpServer())
+      .post('/subscriptions/upgrade')
+      .set('Authorization', `Bearer ${customer.token}`)
+      .send({ planId: 'growth', method: 'instapay', amountEgp: 3500, reference: 'UP-GROWTH-DUPLICATE', proofUrl: 's3://proofs/upgrade-growth-duplicate.jpg' })
+      .expect(409);
+
+    expect(duplicateUpgrade.body.message).toContain('already pending');
+
+    const pendingGrowthSubscriptions = await moduleRef.get(PrismaService).subscription.findMany({
+      where: { organizationId: customer.organizationId, planId: 'growth', status: 'needs_review' }
+    });
+    expect(pendingGrowthSubscriptions).toHaveLength(1);
+    expect(pendingGrowthSubscriptions[0].id).toBe(firstUpgrade.body.subscription.id);
+  });
+
 });

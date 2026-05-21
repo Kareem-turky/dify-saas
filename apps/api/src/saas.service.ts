@@ -1,4 +1,4 @@
-import { BadRequestException, ForbiddenException, HttpException, HttpStatus, Injectable, InternalServerErrorException, NotFoundException, UnauthorizedException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, HttpException, HttpStatus, Injectable, InternalServerErrorException, NotFoundException, UnauthorizedException } from '@nestjs/common';
 import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes, timingSafeEqual } from 'crypto';
 import { mkdir, writeFile } from 'fs/promises';
 import path from 'path';
@@ -306,6 +306,12 @@ export class SaasService {
     const targetPlan = input.planId ? await this.db.plan.findUnique({ where: { id: input.planId } }) : null;
     if (!targetPlan) throw new BadRequestException('Unknown target plan');
     if (targetPlan.monthlyPriceEgp <= currentSubscription.plan.monthlyPriceEgp) throw new BadRequestException('Upgrade plan must be higher than the current plan');
+
+    const pendingUpgrade = await this.db.subscription.findFirst({
+      where: { organizationId: organization.id, planId: targetPlan.id, status: 'needs_review' },
+      include: { payments: { where: { status: 'needs_review' }, take: 1 } }
+    });
+    if (pendingUpgrade) throw new ConflictException('An upgrade request for this plan is already pending admin review');
 
     const uploadedProof = input.proofUploadId
       ? await this.db.paymentProof.findUnique({ where: { id: input.proofUploadId } })
