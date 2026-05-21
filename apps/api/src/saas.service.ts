@@ -1,4 +1,4 @@
-import { BadRequestException, ForbiddenException, Injectable, InternalServerErrorException, NotFoundException, UnauthorizedException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, HttpException, HttpStatus, Injectable, InternalServerErrorException, NotFoundException, UnauthorizedException } from '@nestjs/common';
 import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes, timingSafeEqual } from 'crypto';
 import { mkdir, writeFile } from 'fs/promises';
 import path from 'path';
@@ -8,6 +8,48 @@ import { PrismaService } from './prisma.service';
 const id = (prefix: string) => `${prefix}_${Math.random().toString(36).slice(2, 10)}`;
 const MAX_PAYMENT_PROOF_BYTES = 5 * 1024 * 1024;
 const ALLOWED_PAYMENT_PROOF_MIME_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'application/pdf']);
+
+type RateBucket = { count: number; resetAt: number };
+const loginRateBuckets = new Map<string, RateBucket>();
+const metaWebhookRateBuckets = new Map<string, RateBucket>();
+
+function envPositiveInt(name: string, fallback: number) {
+  const configured = Number(process.env[name] || fallback);
+  return Number.isFinite(configured) && configured > 0 ? Math.floor(configured) : fallback;
+}
+
+function checkFixedWindowRateLimit(input: { buckets: Map<string, RateBucket>; key: string; max: number; windowMs: number; message: string }) {
+  const now = Date.now();
+  const existing = input.buckets.get(input.key);
+  if (!existing || existing.resetAt <= now) {
+    input.buckets.set(input.key, { count: 1, resetAt: now + input.windowMs });
+    return;
+  }
+  if (existing.count >= input.max) {
+    throw new HttpException(input.message, HttpStatus.TOO_MANY_REQUESTS);
+  }
+  existing.count += 1;
+}
+
+function checkLoginRateLimit(email?: string) {
+  checkFixedWindowRateLimit({
+    buckets: loginRateBuckets,
+    key: (email || 'unknown').toLowerCase(),
+    max: envPositiveInt('LOGIN_RATE_LIMIT_MAX', 20),
+    windowMs: envPositiveInt('LOGIN_RATE_LIMIT_WINDOW_MS', 60_000),
+    message: 'Too many login attempts. Please wait and try again.'
+  });
+}
+
+function checkMetaWebhookRateLimit(source?: string) {
+  checkFixedWindowRateLimit({
+    buckets: metaWebhookRateBuckets,
+    key: source?.split(',')[0]?.trim() || 'unknown',
+    max: envPositiveInt('META_WEBHOOK_RATE_LIMIT_MAX', 200),
+    windowMs: envPositiveInt('META_WEBHOOK_RATE_LIMIT_WINDOW_MS', 60_000),
+    message: 'Too many Meta webhook requests. Please retry later.'
+  });
+}
 
 function messageEventMaxRetries() {
   const configured = Number(process.env.MESSAGE_EVENT_MAX_RETRIES || 3);
@@ -188,6 +230,7 @@ export class SaasService {
   }
 
   async login(input: { email: string; password: string }) {
+    checkLoginRateLimit(input.email);
     const user = await this.db.user.findUnique({ where: { email: input.email.toLowerCase() } });
     if (!user || !verifyPassword(input.password, user.passwordHash)) throw new UnauthorizedException('Invalid email or password');
     if (user.role === 'admin') {
@@ -552,7 +595,8 @@ export class SaasService {
     return query['hub.challenge'];
   }
 
-  async receiveMetaWebhook(payload: unknown, signature?: string, rawBody?: Buffer) {
+  async receiveMetaWebhook(payload: unknown, signature?: string, rawBody?: Buffer, source?: string) {
+    checkMetaWebhookRateLimit(source);
     verifyMetaWebhookSignature(payload, signature, rawBody);
     const statusCallbacks = this.extractWhatsappStatusCallbacks(payload);
     const statusesUpdated = await this.updateWhatsappStatusCallbacks(statusCallbacks);

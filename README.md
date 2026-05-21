@@ -555,6 +555,25 @@ oldestFailedAt
 - رد الـ retry أصبح يرجع `skippedNotDue` و `deadLettered` عند وجودهم.
 - صفحة `/admin` تعرض monitoring summary لقوائم WhatsApp/Messenger مع retryable/dead-letter counts.
 
+## Phase 4 production hardening — basic API rate limits
+
+تمت إضافة guardrails مبدئية لتقليل brute-force/traffic spikes قبل الانتقال لـ Redis/BullMQ:
+
+- `POST /auth/login` عليه fixed-window rate limit حسب البريد.
+- `POST /webhooks/meta` عليه fixed-window rate limit حسب source IP من `x-forwarded-for` أو request IP.
+- عند تخطي الحد يرجع API status `429` برسالة واضحة.
+
+الإعدادات:
+
+```text
+LOGIN_RATE_LIMIT_MAX=20
+LOGIN_RATE_LIMIT_WINDOW_MS=60000
+META_WEBHOOK_RATE_LIMIT_MAX=200
+META_WEBHOOK_RATE_LIMIT_WINDOW_MS=60000
+```
+
+ملاحظة: التنفيذ الحالي in-memory مناسب كبداية/dev أو instance واحدة. في الإنتاج متعدد النسخ يجب نقله إلى Redis/shared store.
+
 ## Meta webhook signature verification
 
 تمت إضافة أول جزء من production hardening لقنوات Meta:
