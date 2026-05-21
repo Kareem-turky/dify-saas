@@ -47,6 +47,20 @@ describe('Authentication and RBAC foundation', () => {
     else process.env.AUTH_TOKEN_SECRET = previousAuthSecret;
   });
 
+  it('signs up a customer with a bearer token so the browser can continue without manual token copy', async () => {
+    const signup = await signupCustomer(app);
+
+    expect(signup.body.token).toMatch(/^hst_/);
+    expect(signup.body.user.passwordHash).toBeUndefined();
+
+    const me = await request(app.getHttpServer())
+      .get('/auth/me')
+      .set('Authorization', `Bearer ${signup.body.token}`)
+      .expect(200);
+
+    expect(me.body.user).toMatchObject({ email: signup.body.user.email, role: 'customer', organizationId: signup.body.organization.id });
+  });
+
   it('logs in a customer and returns the current user from a bearer token', async () => {
     const signup = await signupCustomer(app);
 

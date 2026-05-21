@@ -226,7 +226,7 @@ export class SaasService {
       return { user, organization, subscription };
     });
 
-    return { user: publicUser(user), organization, subscription, nextStep: 'submit_manual_payment_or_card_payment' };
+    return { token: createToken(user.id), user: publicUser(user), organization, subscription, nextStep: 'submit_manual_payment_or_card_payment' };
   }
 
   async login(input: { email: string; password: string }) {
