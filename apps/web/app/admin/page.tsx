@@ -40,6 +40,19 @@ type MessageEventSummary = {
   oldestFailedAt?: string | null;
 };
 
+type ReadinessStatus = {
+  ok: boolean;
+  checkedAt: string;
+  checks: {
+    database: { ok: boolean; latencyMs: number };
+    adminUser: { ok: boolean; configured: boolean };
+    authTokenSecret: { ok: boolean; configured: boolean };
+    paymentProofStorage: { ok: boolean; pathConfigured: boolean };
+    difyGateway: { ok: boolean; mode: string; tokenConfigured: boolean };
+    provisioningWorker: { enabled?: boolean; running?: boolean; lastError?: string | null };
+  };
+};
+
 type AuditLogRow = {
   id: string;
   actorUserId?: string | null;
@@ -59,6 +72,7 @@ export default function AdminPage(){
   const [auditLogs, setAuditLogs] = useState<AuditLogRow[]>([]);
   const [messageSummary, setMessageSummary] = useState<MessageEventSummary | null>(null);
   const [difyStatus, setDifyStatus] = useState<DifyStatus | null>(null);
+  const [readiness, setReadiness] = useState<ReadinessStatus | null>(null);
   const [message, setMessage] = useState('');
   const [adminEmail, setAdminEmail] = useState('');
   const [adminPassword, setAdminPassword] = useState('');
@@ -94,6 +108,12 @@ export default function AdminPage(){
     setMessageSummary(await response.json());
   }
 
+  async function loadReadiness(){
+    const response = await fetch(`${API_BASE}/admin/readiness`, { headers: { Authorization: `Bearer ${adminToken}` } });
+    if (!response.ok) throw new Error('تعذر تحميل readiness checks.');
+    setReadiness(await response.json());
+  }
+
   async function refreshAll(){
     if (!adminToken) {
       setMessage('سجل دخول الأدمن الأول.');
@@ -101,7 +121,7 @@ export default function AdminPage(){
     }
     setMessage('جاري تحميل لوحة الأدمن...');
     try {
-      await Promise.all([loadApprovals(), loadJobs(), loadDifyStatus(), loadAuditLogs(), loadMessageSummary()]);
+      await Promise.all([loadApprovals(), loadJobs(), loadDifyStatus(), loadAuditLogs(), loadMessageSummary(), loadReadiness()]);
       setMessage('');
     } catch (error) {
       setMessage(error instanceof Error ? error.message : 'حصل خطأ أثناء تحميل لوحة الأدمن');
@@ -215,6 +235,16 @@ export default function AdminPage(){
       <div className="item"><h3>Total provisioning</h3><p>{jobs.length} job في النظام.</p></div>
       <div className="item"><h3>Message retries</h3><p>{messageSummary?.retryableFailed ?? 0} retryable · {messageSummary?.deadLettered ?? 0} dead-letter.</p><button className="btn secondary" onClick={retryFailedMessages} disabled={!adminToken}>Retry failed messages</button></div>
     </div>
+
+    <section style={{marginTop: 32}}>
+      <h2>Production readiness</h2>
+      <div className="grid">
+        <div className="item"><strong>Overall</strong><p>{readiness ? (readiness.ok ? 'Ready' : 'Needs attention') : 'Not loaded'}</p></div>
+        <div className="item"><strong>Database</strong><p>{readiness ? `${readiness.checks.database.ok ? 'OK' : 'Fail'} · ${readiness.checks.database.latencyMs}ms` : 'Not loaded'}</p></div>
+        <div className="item"><strong>Admin/Auth</strong><p>{readiness ? `admin ${readiness.checks.adminUser.ok ? 'OK' : 'missing'} · secret ${readiness.checks.authTokenSecret.configured ? 'configured' : 'missing'}` : 'Not loaded'}</p></div>
+        <div className="item"><strong>Storage/Worker</strong><p>{readiness ? `proof storage ${readiness.checks.paymentProofStorage.ok ? 'OK' : 'fail'} · worker ${readiness.checks.provisioningWorker.enabled ? 'enabled' : 'disabled'}${readiness.checks.provisioningWorker.running ? ' · running' : ''}` : 'Not loaded'}</p></div>
+      </div>
+    </section>
 
     <section style={{marginTop: 32}}>
       <h2>Dify gateway</h2>

@@ -522,6 +522,44 @@ export class SaasService {
     return this.db.provisioningJob.findMany({ orderBy: { createdAt: 'desc' }, include: { organization: true } });
   }
 
+  async getReadiness(input: { difyGateway: { mode: string; ready: boolean; tokenConfigured: boolean; requiresExistingDifyOwnerAccount: boolean }; provisioningWorker: Record<string, unknown> }) {
+    const started = Date.now();
+    let database = { ok: false, latencyMs: 0 };
+    try {
+      await this.db.$queryRaw`SELECT 1`;
+      database = { ok: true, latencyMs: Date.now() - started };
+    } catch {
+      database = { ok: false, latencyMs: Date.now() - started };
+    }
+
+    const adminUserCount = await this.db.user.count({ where: { role: 'admin' } }).catch(() => 0);
+    const paymentProofRoot = getPaymentProofUploadRoot();
+    let paymentProofStorage = { ok: false, pathConfigured: Boolean(process.env.PAYMENT_PROOF_UPLOAD_DIR) };
+    try {
+      await mkdir(paymentProofRoot, { recursive: true });
+      paymentProofStorage = { ok: true, pathConfigured: Boolean(process.env.PAYMENT_PROOF_UPLOAD_DIR) };
+    } catch {
+      paymentProofStorage = { ok: false, pathConfigured: Boolean(process.env.PAYMENT_PROOF_UPLOAD_DIR) };
+    }
+
+    const authTokenSecretConfigured = Boolean(process.env.AUTH_TOKEN_SECRET);
+    const checks = {
+      database,
+      adminUser: { ok: adminUserCount > 0, configured: adminUserCount > 0 },
+      authTokenSecret: { ok: authTokenSecretConfigured, configured: authTokenSecretConfigured },
+      paymentProofStorage,
+      difyGateway: {
+        ok: input.difyGateway.ready,
+        mode: input.difyGateway.mode,
+        tokenConfigured: input.difyGateway.tokenConfigured,
+        requiresExistingDifyOwnerAccount: input.difyGateway.requiresExistingDifyOwnerAccount
+      },
+      provisioningWorker: input.provisioningWorker
+    };
+    const ok = checks.database.ok && checks.adminUser.ok && checks.authTokenSecret.ok && checks.paymentProofStorage.ok && checks.difyGateway.ok;
+    return { ok, service: 'dify-saas-api', checkedAt: new Date().toISOString(), checks };
+  }
+
   async getInvoiceReceipt(invoiceId: string) {
     const invoice = await this.db.invoice.findUnique({
       where: { id: invoiceId },
