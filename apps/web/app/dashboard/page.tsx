@@ -14,6 +14,7 @@ type DashboardSummary = {
   currentStep: 'submit_payment' | 'wait_for_admin_review' | 'wait_for_ai_studio' | 'open_ai_studio' | 'contact_support';
   aiStudioUrl: string | null;
   usage?: { messagesUsed: number; messageLimit: number; messagesRemaining: number; limitReached: boolean; windowStart: string; windowEnd: string; channelsUsed: number; channelLimit: number; channelsRemaining: number; channelLimitReached: boolean; upgradeRecommendation?: { reason: 'message_limit' | 'channel_limit'; currentPlanId: string; recommendedPlanId: string; recommendedPlanName: string; monthlyPriceEgp: number } };
+  pendingUpgrade: { subscription: { id: string; status: string; planId: string }; plan: { id: string; name: string; monthlyPriceEgp: number }; payment: { id: string; status: string; amountEgp: number; reference?: string | null } | null; approval: { id: string; status: string; notes?: string | null } | null } | null;
 };
 
 const stepCopy: Record<DashboardSummary['currentStep'], { title: string; body: string }> = {
@@ -80,6 +81,15 @@ export default function DashboardPage(){
           {summary.aiStudioUrl && <a className="btn" href={summary.aiStudioUrl} target="_blank">Open AI Studio</a>}
         </div>
       </div>
+
+
+
+      {summary.pendingUpgrade && <div className="card" style={{marginTop: 16}}>
+        <span className="badge">upgrade pending</span>
+        <h2>طلب الترقية قيد المراجعة</h2>
+        <p>باقتك الحالية مازالت فعالة: <strong>{summary.plan?.name}</strong>. طلب الترقية إلى <strong>{summary.pendingUpgrade.plan.name}</strong> في انتظار مراجعة الأدمن.</p>
+        <p>Payment: {summary.pendingUpgrade.payment ? `${summary.pendingUpgrade.payment.status} · ${summary.pendingUpgrade.payment.amountEgp} EGP` : 'لم يتم تسجيل دفع للترقية'} · Approval: {summary.pendingUpgrade.approval?.status || 'open'}</p>
+      </div>}
 
       <div className="grid">
         {steps.map((step, index) => <div className="item" key={step.key}>

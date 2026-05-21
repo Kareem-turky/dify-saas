@@ -849,7 +849,12 @@ export class SaasService {
   }
 
   private async getOrganizationUsage(organizationId: string) {
-    const subscription = await this.db.subscription.findFirst({
+    const activeSubscription = await this.db.subscription.findFirst({
+      where: { organizationId, status: 'active' },
+      orderBy: { createdAt: 'desc' },
+      include: { plan: true }
+    });
+    const subscription = activeSubscription || await this.db.subscription.findFirst({
       where: { organizationId },
       orderBy: { createdAt: 'desc' },
       include: { plan: true }
@@ -1324,11 +1329,26 @@ export class SaasService {
     const organization = await this.db.organization.findUnique({ where: { id: organizationId } });
     if (!organization) throw new NotFoundException('Organization not found');
 
-    const subscription = await this.db.subscription.findFirst({
+    const activeSubscription = await this.db.subscription.findFirst({
+      where: { organizationId, status: 'active' },
+      orderBy: { createdAt: 'desc' },
+      include: { plan: true }
+    });
+    const latestSubscription = await this.db.subscription.findFirst({
       where: { organizationId },
       orderBy: { createdAt: 'desc' },
       include: { plan: true }
     });
+    const subscription = activeSubscription || latestSubscription;
+    const pendingUpgradeSubscription = activeSubscription ? await this.db.subscription.findFirst({
+      where: { organizationId, status: 'needs_review', plan: { monthlyPriceEgp: { gt: activeSubscription.plan.monthlyPriceEgp } } },
+      orderBy: { createdAt: 'desc' },
+      include: { plan: true, payments: { where: { status: 'needs_review' }, orderBy: { createdAt: 'desc' }, take: 1 } }
+    }) : null;
+    const pendingUpgradePayment = pendingUpgradeSubscription?.payments[0] || null;
+    const pendingUpgradeApproval = pendingUpgradePayment
+      ? await this.db.approvalRequest.findFirst({ where: { paymentId: pendingUpgradePayment.id }, orderBy: { createdAt: 'desc' } })
+      : null;
     const payment = await this.db.payment.findFirst({ where: { organizationId }, orderBy: { createdAt: 'desc' } });
     const approval = await this.db.approvalRequest.findFirst({ where: { organizationId }, orderBy: { createdAt: 'desc' } });
     const provisioningJob = await this.db.provisioningJob.findFirst({ where: { organizationId }, orderBy: { createdAt: 'desc' } });
@@ -1355,7 +1375,13 @@ export class SaasService {
       provisioningJob,
       currentStep,
       aiStudioUrl,
-      usage
+      usage,
+      pendingUpgrade: pendingUpgradeSubscription ? {
+        subscription: { id: pendingUpgradeSubscription.id, status: pendingUpgradeSubscription.status, planId: pendingUpgradeSubscription.planId },
+        plan: pendingUpgradeSubscription.plan,
+        payment: pendingUpgradePayment,
+        approval: pendingUpgradeApproval
+      } : null
     };
   }
 }

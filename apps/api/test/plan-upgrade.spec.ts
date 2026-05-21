@@ -105,4 +105,29 @@ describe('Plan upgrade requests', () => {
     expect(pendingGrowthSubscriptions[0].id).toBe(firstUpgrade.body.subscription.id);
   });
 
+
+  it('shows a pending upgrade separately from the active plan on the dashboard', async () => {
+    const customer = await createActiveStarterCustomer(app, adminToken);
+
+    const upgrade = await request(app.getHttpServer())
+      .post('/subscriptions/upgrade')
+      .set('Authorization', `Bearer ${customer.token}`)
+      .send({ planId: 'growth', method: 'instapay', amountEgp: 3500, reference: 'UP-GROWTH-DASH', proofUrl: 's3://proofs/upgrade-growth-dashboard.jpg' })
+      .expect(201);
+
+    const dashboard = await request(app.getHttpServer())
+      .get(`/organizations/${customer.organizationId}/dashboard`)
+      .expect(200);
+
+    expect(dashboard.body.subscription).toMatchObject({ planId: 'starter', status: 'active' });
+    expect(dashboard.body.plan).toMatchObject({ id: 'starter', name: 'Starter' });
+    expect(dashboard.body.currentStep).toBe('open_ai_studio');
+    expect(dashboard.body.pendingUpgrade).toMatchObject({
+      subscription: { id: upgrade.body.subscription.id, planId: 'growth', status: 'needs_review' },
+      plan: { id: 'growth', name: 'Growth' },
+      payment: { id: upgrade.body.payment.id, status: 'needs_review', amountEgp: 3500 },
+      approval: { id: upgrade.body.approval.id, status: 'open' }
+    });
+  });
+
 });
