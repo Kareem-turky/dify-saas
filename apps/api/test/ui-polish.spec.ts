@@ -22,6 +22,8 @@ describe('MVP UI polish source checks', () => {
     expect(dashboard).toContain('MVP launch checklist');
     expect(dashboard).toContain('Next best action');
     expect(dashboard).toContain('progress-bar');
+    expect(dashboard).toContain('/receipt.html');
+    expect(dashboard).toContain('Print receipt');
     expect(admin).toContain('Ops command center');
     expect(admin).toContain('Production readiness');
     expect(admin).toContain('status-pill');

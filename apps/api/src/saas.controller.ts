@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Headers, Param, Post, Put, Query, Req, UploadedFile, UseInterceptors } from '@nestjs/common';
+import { Body, Controller, Get, Header, Headers, Param, Post, Put, Query, Req, UploadedFile, UseInterceptors } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
 import { DifyProvisioningGateway, DifyProvisioningService } from './dify-provisioning.service';
@@ -38,6 +38,9 @@ export class SaasController {
   @Post('admin/approvals/:paymentId/approve') async approve(@Param('paymentId') paymentId: string, @Body() body: { notes?: string }, @Headers('authorization') authorization?: string) { const admin = await this.saas.requireAdmin(authorization); return this.saas.approvePayment(paymentId, body?.notes, admin.id); }
   @Get('provisioning/dify/status') difyStatus() { return this.difyGateway.getStatus(); }
   @Get('billing/invoices/:invoiceId/receipt') invoiceReceipt(@Param('invoiceId') invoiceId: string) { return this.saas.getInvoiceReceipt(invoiceId); }
+  @Get('billing/invoices/:invoiceId/receipt.html')
+  @Header('Content-Type', 'text/html; charset=utf-8')
+  printableInvoiceReceipt(@Param('invoiceId') invoiceId: string) { return this.saas.renderInvoiceReceiptHtml(invoiceId); }
   @Get('provisioning/jobs') async jobs(@Headers('authorization') authorization?: string) { await this.saas.requireAdmin(authorization); return this.saas.listProvisioningJobs(); }
   @Post('provisioning/jobs/run-due') async runDueProvisioningJobs(@Headers('authorization') authorization?: string) { const admin = await this.saas.requireAdmin(authorization); return this.provisioning.runDueJobs(10, admin.id); }
   @Post('provisioning/jobs/:jobId/run') async runProvisioningJob(@Param('jobId') jobId: string, @Headers('authorization') authorization?: string) { const admin = await this.saas.requireAdmin(authorization); return this.provisioning.runJob(jobId, admin.id); }

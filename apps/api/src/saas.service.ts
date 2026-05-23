@@ -175,6 +175,28 @@ function invoiceReceiptUrl(invoiceId: string) {
   return `/billing/invoices/${invoiceId}/receipt`;
 }
 
+function printableInvoiceReceiptUrl(invoiceId: string) {
+  return `/billing/invoices/${invoiceId}/receipt.html`;
+}
+
+function escapeHtml(value: unknown) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function formatReceiptDate(value?: Date | string | null) {
+  if (!value) return '—';
+  return new Date(value).toISOString().slice(0, 10);
+}
+
+function formatEgp(amount: number) {
+  return `${amount.toLocaleString('en-US')} EGP`;
+}
+
 function publicUser<T extends { passwordHash?: string | null }>(user: T) {
   const { passwordHash: _passwordHash, ...safeUser } = user;
   return safeUser;
@@ -581,8 +603,78 @@ export class SaasService {
       status: invoice.status,
       issuedAt: invoice.issuedAt,
       paidAt: invoice.paidAt,
-      receiptUrl: invoice.receiptUrl || invoiceReceiptUrl(invoice.id)
+      receiptUrl: invoice.receiptUrl || invoiceReceiptUrl(invoice.id),
+      printableReceiptUrl: printableInvoiceReceiptUrl(invoice.id)
     };
+  }
+
+  async renderInvoiceReceiptHtml(invoiceId: string) {
+    const receipt = await this.getInvoiceReceipt(invoiceId);
+    const rows = [
+      ['Invoice number', receipt.invoiceNumber],
+      ['Customer', receipt.organizationName],
+      ['Plan', receipt.planName],
+      ['Amount', formatEgp(receipt.amountEgp)],
+      ['Status', receipt.status],
+      ['Payment method', receipt.paymentMethod],
+      ['Payment reference', receipt.paymentReference || '—'],
+      ['Issued at', formatReceiptDate(receipt.issuedAt)],
+      ['Paid at', formatReceiptDate(receipt.paidAt)]
+    ];
+    return `<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>${escapeHtml(receipt.invoiceNumber)} · Receipt</title>
+  <style>
+    :root { color-scheme: light; font-family: Inter, Arial, sans-serif; color: #102033; background: #f5f7fb; }
+    body { margin: 0; padding: 32px; }
+    .receipt { max-width: 860px; margin: auto; background: white; border: 1px solid #e4e9f2; border-radius: 28px; box-shadow: 0 24px 80px rgba(16,32,51,.12); overflow: hidden; }
+    .hero { padding: 34px; background: linear-gradient(135deg, #101827, #2946d3); color: white; }
+    .eyebrow { text-transform: uppercase; letter-spacing: .16em; opacity: .78; font-size: 12px; }
+    h1 { margin: 8px 0 4px; font-size: 34px; }
+    .subtitle { margin: 0; opacity: .86; }
+    .content { padding: 32px; }
+    .summary { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; margin-bottom: 26px; }
+    .metric { border: 1px solid #edf1f7; border-radius: 18px; padding: 16px; background: #fbfcff; }
+    .metric span { display: block; color: #667085; font-size: 13px; margin-bottom: 6px; }
+    .metric strong { font-size: 20px; color: #101827; }
+    table { width: 100%; border-collapse: collapse; direction: ltr; text-align: left; }
+    th, td { padding: 14px 12px; border-bottom: 1px solid #eef2f6; }
+    th { width: 34%; color: #667085; font-weight: 600; }
+    .actions { display: flex; gap: 12px; margin-top: 28px; flex-wrap: wrap; }
+    .btn { border: 0; border-radius: 999px; padding: 12px 18px; color: white; background: #2946d3; font-weight: 700; cursor: pointer; text-decoration: none; }
+    .btn.secondary { color: #2946d3; background: #eef2ff; }
+    .note { margin-top: 24px; color: #667085; font-size: 13px; }
+    @media print { body { padding: 0; background: white; } .receipt { box-shadow: none; border: 0; border-radius: 0; } .actions { display: none; } }
+  </style>
+</head>
+<body>
+  <article class="receipt">
+    <section class="hero">
+      <div class="eyebrow">Professional payment receipt</div>
+      <h1>إيصال دفع رسمي</h1>
+      <p class="subtitle">Dify SaaS Platform · ${escapeHtml(receipt.invoiceNumber)}</p>
+    </section>
+    <section class="content">
+      <div class="summary">
+        <div class="metric"><span>Customer</span><strong>${escapeHtml(receipt.organizationName)}</strong></div>
+        <div class="metric"><span>Amount</span><strong>${escapeHtml(formatEgp(receipt.amountEgp))}</strong></div>
+        <div class="metric"><span>Status</span><strong>${escapeHtml(receipt.status)}</strong></div>
+      </div>
+      <table aria-label="Receipt details"><tbody>
+        ${rows.map(([label, value]) => `<tr><th>${escapeHtml(label)}</th><td>${escapeHtml(value)}</td></tr>`).join('')}
+      </tbody></table>
+      <div class="actions">
+        <button class="btn" onclick="window.print()">Print / Save as PDF</button>
+        <a class="btn secondary" href="${escapeHtml(receipt.receiptUrl)}">JSON receipt</a>
+      </div>
+      <p class="note">This receipt is generated from approved manual payment records. It intentionally excludes secrets, API keys, and internal admin credentials.</p>
+    </section>
+  </article>
+</body>
+</html>`;
   }
 
   listAuditLogs() {

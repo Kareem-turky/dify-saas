@@ -86,5 +86,18 @@ describe('Billing invoices and receipts', () => {
       currency: 'EGP',
       paymentReference: 'INV-REF-001'
     });
+
+
+    const printableReceipt = await request(app.getHttpServer())
+      .get(`/billing/invoices/${approval.body.invoice.id}/receipt.html`)
+      .expect(200)
+      .expect('Content-Type', /text\/html/);
+
+    expect(printableReceipt.text).toContain('Invoice Co');
+    expect(printableReceipt.text).toContain(approval.body.invoice.invoiceNumber);
+    expect(printableReceipt.text).toContain('Professional payment receipt');
+    expect(printableReceipt.text).toContain('إيصال دفع رسمي');
+    expect(printableReceipt.text).toContain('window.print()');
+    expect(printableReceipt.text).not.toMatch(/difyAppApiKey|accessToken|admin@example.com|CustomerPass123/);
   });
 });
