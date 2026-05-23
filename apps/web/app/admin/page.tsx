@@ -77,6 +77,7 @@ export default function AdminPage(){
   const [adminEmail, setAdminEmail] = useState('');
   const [adminPassword, setAdminPassword] = useState('');
   const [adminToken, setAdminToken] = useState('');
+  const [reviewFilter, setReviewFilter] = useState<'all' | 'open' | 'approved' | 'blocked'>('all');
 
   async function loadApprovals(){
     const response = await fetch(`${API_BASE}/admin/approvals`, { headers: { Authorization: `Bearer ${adminToken}` } });
@@ -212,11 +213,33 @@ export default function AdminPage(){
   useEffect(() => { if (adminToken) void refreshAll(); }, [adminToken]);
 
   const openApprovals = rows.filter(row => row.approval.status === 'open');
+  const reviewedApprovals = rows.filter(row => row.approval.status !== 'open');
+  const failedJobs = jobs.filter(job => job.status === 'failed' || job.status === 'dead');
   const runnableJobs = jobs.filter(job => job.status === 'queued' || job.status === 'failed');
+  const filteredApprovals = rows.filter(row => {
+    if (reviewFilter === 'all') return true;
+    if (reviewFilter === 'open') return row.approval.status === 'open';
+    if (reviewFilter === 'approved') return row.approval.status !== 'open';
+    return row.payment?.status === 'rejected' || row.organization?.status === 'suspended';
+  });
+  const liveRiskCount = failedJobs.length + (messageSummary?.retryableFailed ?? 0) + (readiness?.ok === false ? 1 : 0);
+  const provisioningSlaLabel = failedJobs.length === 0 ? 'On track' : `${failedJobs.length} تحتاج تدخل`;
 
-  return <main className="shell">
+  return <main className="shell admin-shell">
     <div className="section-title"><span>Ops command center</span><span className="status-pill good">admin console</span></div>
-    <p>مراجعة المدفوعات اليدوية، تشغيل Dify provisioning، متابعة readiness، audit logs، وmessage retries من شاشة واحدة.</p>
+    <section className="item glass admin-hero">
+      <div>
+        <span className="status-pill good">Admin cockpit</span>
+        <h1>لوحة تحكم الأدمن</h1>
+        <p>مراجعة المدفوعات اليدوية، تشغيل Dify provisioning، متابعة readiness، audit logs، وmessage retries من شاشة واحدة.</p>
+      </div>
+      <div className="ops-checklist">
+        <strong>Today operator checklist</strong>
+        <span>1. راجع المدفوعات المفتوحة</span>
+        <span>2. شغّل jobs الجاهزة</span>
+        <span>3. راقب live risks قبل العرض</span>
+      </div>
+    </section>
     <div className="item" style={{marginTop: 20}}>
       <h2>Admin login</h2>
       <input className="input" type="email" value={adminEmail} onChange={event => setAdminEmail(event.target.value)} placeholder="Admin email" />
@@ -229,11 +252,11 @@ export default function AdminPage(){
     </div>
     {message && <p>{message}</p>}
 
-    <div className="grid">
+    <div className="grid admin-dashboard-grid">
       <div className="item metric"><h3>Open approvals</h3><p>{openApprovals.length} طلب محتاج مراجعة.</p></div>
-      <div className="item metric"><h3>Runnable jobs</h3><p>{runnableJobs.length} job جاهز للتشغيل أو retry.</p></div>
-      <div className="item metric"><h3>Total provisioning</h3><p>{jobs.length} job في النظام.</p></div>
-      <div className="item metric"><h3>Message retries</h3><p>{messageSummary?.retryableFailed ?? 0} retryable · {messageSummary?.deadLettered ?? 0} dead-letter.</p><button className="btn secondary" onClick={retryFailedMessages} disabled={!adminToken}>Retry failed messages</button></div>
+      <div className="item metric"><h3>Revenue reviewed</h3><p>{reviewedApprovals.length} دفعة اتراجعت.</p></div>
+      <div className="item metric"><h3>Provisioning SLA</h3><p>{provisioningSlaLabel} · {runnableJobs.length} job جاهز.</p></div>
+      <div className="item metric"><h3>Live risk monitor</h3><p>{liveRiskCount} risk signal · {messageSummary?.deadLettered ?? 0} dead-letter.</p><button className="btn secondary" onClick={retryFailedMessages} disabled={!adminToken}>Retry failed messages</button></div>
     </div>
 
     <section style={{marginTop: 32}}>
@@ -264,8 +287,14 @@ export default function AdminPage(){
         <h2>Manual payment approvals</h2>
         <button className="btn secondary" onClick={refreshAll}>Refresh</button>
       </div>
+      <div className="cta" style={{marginBottom: 12}}>
+        <button className={reviewFilter === 'all' ? 'btn' : 'btn secondary'} onClick={() => setReviewFilter('all')}>All reviews</button>
+        <button className={reviewFilter === 'open' ? 'btn' : 'btn secondary'} onClick={() => setReviewFilter('open')}>Open only</button>
+        <button className={reviewFilter === 'approved' ? 'btn' : 'btn secondary'} onClick={() => setReviewFilter('approved')}>Reviewed</button>
+        <button className={reviewFilter === 'blocked' ? 'btn' : 'btn secondary'} onClick={() => setReviewFilter('blocked')}>Blocked</button>
+      </div>
       {openApprovals.length === 0 && <p>لا توجد طلبات موافقة مفتوحة حالياً.</p>}
-      {rows.map(row => <div className="item" key={row.approval.id} style={{marginBottom: 12}}>
+      {filteredApprovals.map(row => <div className="item" key={row.approval.id} style={{marginBottom: 12}}>
         <strong>{row.organization?.name || row.approval.id}</strong>
         <p>Payment: {row.payment?.method} — {row.payment?.amountEgp} EGP — {row.payment?.status}</p>
         <p>Reference: {row.payment?.reference || 'No reference'} · Organization status: {row.organization?.status}</p>

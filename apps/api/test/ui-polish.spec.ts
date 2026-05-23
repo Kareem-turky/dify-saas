@@ -27,6 +27,12 @@ describe('MVP UI polish source checks', () => {
     expect(admin).toContain('Ops command center');
     expect(admin).toContain('Production readiness');
     expect(admin).toContain('status-pill');
+    for (const copy of ['Admin cockpit', 'Revenue reviewed', 'Provisioning SLA', 'Live risk monitor']) {
+      expect(admin).toContain(copy);
+    }
+    for (const implementation of ['reviewFilter', 'filteredApprovals', 'admin-dashboard-grid', 'ops-checklist']) {
+      expect(admin).toContain(implementation);
+    }
   });
 
   it('has a Meta-ready data deletion instructions page for app review', () => {
