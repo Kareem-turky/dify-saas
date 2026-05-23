@@ -107,6 +107,34 @@ function metaWebhookAppSecret() {
   return process.env.META_WEBHOOK_APP_SECRET || '';
 }
 
+function publicWebBaseUrl() {
+  return trimTrailingSlash(process.env.PUBLIC_WEB_URL || 'http://localhost:3001');
+}
+
+function verifyMetaSignedRequest(signedRequest?: string) {
+  const appSecret = metaWebhookAppSecret();
+  if (!appSecret || !signedRequest) {
+    throw new UnauthorizedException('Invalid Meta signed request');
+  }
+
+  const [encodedSignature, encodedPayload] = signedRequest.split('.');
+  if (!encodedSignature || !encodedPayload) {
+    throw new UnauthorizedException('Invalid Meta signed request');
+  }
+
+  const expected = createHmac('sha256', appSecret).update(encodedPayload).digest();
+  const received = Buffer.from(encodedSignature, 'base64url');
+  if (expected.length !== received.length || !timingSafeEqual(expected, received)) {
+    throw new UnauthorizedException('Invalid Meta signed request');
+  }
+
+  try {
+    return JSON.parse(Buffer.from(encodedPayload, 'base64url').toString('utf8')) as { user_id?: string };
+  } catch {
+    throw new UnauthorizedException('Invalid Meta signed request');
+  }
+}
+
 function verifyMetaWebhookSignature(payload: unknown, signature?: string, rawBody?: Buffer) {
   if (!metaWebhookSignatureRequired()) return;
   const appSecret = metaWebhookAppSecret();
@@ -177,6 +205,11 @@ function invoiceReceiptUrl(invoiceId: string) {
 
 function printableInvoiceReceiptUrl(invoiceId: string) {
   return `/billing/invoices/${invoiceId}/receipt.html`;
+}
+
+function dataDeletionConfirmationCode(metaUserId?: string) {
+  const source = `${metaUserId || 'unknown'}:${authSecret()}:${Date.now()}:${randomBytes(8).toString('hex')}`;
+  return `del_${createHash('sha256').update(source).digest('hex').slice(0, 16)}`;
 }
 
 function escapeHtml(value: unknown) {
@@ -900,6 +933,15 @@ export class SaasService {
     const channel = await this.db.channel.findFirst({ where: { channelType: { in: ['whatsapp', 'messenger'] }, verifyToken: query['hub.verify_token'], status: 'configured' } });
     if (!channel) throw new ForbiddenException('Invalid Meta webhook verify token');
     return query['hub.challenge'];
+  }
+
+  async handleMetaDataDeletion(input: { signed_request?: string }) {
+    const payload = verifyMetaSignedRequest(input.signed_request);
+    const confirmation_code = dataDeletionConfirmationCode(payload.user_id);
+    return {
+      url: `${publicWebBaseUrl()}/data-deletion?confirmation_code=${confirmation_code}`,
+      confirmation_code
+    };
   }
 
   async receiveMetaWebhook(payload: unknown, signature?: string, rawBody?: Buffer, source?: string) {

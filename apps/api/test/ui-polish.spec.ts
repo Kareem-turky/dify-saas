@@ -29,6 +29,14 @@ describe('MVP UI polish source checks', () => {
     expect(admin).toContain('status-pill');
   });
 
+  it('has a Meta-ready data deletion instructions page for app review', () => {
+    const page = read('apps/web/app/data-deletion/page.tsx');
+    expect(page).toContain('Data Deletion');
+    expect(page).toContain('confirmation_code');
+    expect(page).toContain('Meta');
+    expect(page).toContain('حذف البيانات');
+  });
+
   it('has shared polished visual primitives without secrets', () => {
     const styles = read('apps/web/app/styles.css');
     for (const klass of ['status-pill', 'progress-bar', 'metric', 'glass', 'section-title']) {

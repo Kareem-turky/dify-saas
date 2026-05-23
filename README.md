@@ -624,7 +624,8 @@ windowEnd
 
 ```text
 META_WEBHOOK_SIGNATURE_REQUIRED=true
-META_WEBHOOK_APP_SECRET=<meta-app-secret>
+META_WEBHOOK_APP_SECRET=***
+PUBLIC_WEB_URL=https://your-saas.example.com
 ```
 
 عند تفعيل الإعدادات:
@@ -634,5 +635,27 @@ META_WEBHOOK_APP_SECRET=<meta-app-secret>
 - في التشغيل الإنتاجي يتم تفعيل Nest raw body support حتى يتم توقيع نفس request body القادم من Meta.
 - لو التوقيع غير صحيح يرجع `401 Unauthorized` قبل أي معالجة أو كتابة events.
 
-الخطوة التالية في Phase 4 production hardening: queue/rate limits/dead-letter/monitoring.
+## Meta data deletion callback
+
+تمت إضافة endpoint مطلوب عمليًا لتجهيز Meta App Review وطلبات حذف البيانات:
+
+```text
+POST /meta/data-deletion
+Body: signed_request=<Meta signed_request>
+```
+
+- يتحقق من `signed_request` باستخدام `META_WEBHOOK_APP_SECRET` بدون تسريب user id أو app secret.
+- يرجع رد Meta القياسي:
+
+```json
+{
+  "url": "https://your-saas.example.com/data-deletion?confirmation_code=del_xxxxxxxx",
+  "confirmation_code": "del_xxxxxxxx"
+}
+```
+
+- صفحة `/data-deletion` تعرض تعليمات عربية/إنجليزية للعميل أو مستخدم Meta، وتعرض `confirmation_code` لو موجود في الرابط.
+
+الخطوة التالية في Phase 4 production hardening: ربط Redis/shared store للـ rate limits والـ retry queues أو تجهيز Privacy Policy/Data Deletion URLs النهائية على دومين الإنتاج.
+
 

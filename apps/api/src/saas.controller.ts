@@ -30,6 +30,7 @@ export class SaasController {
   @Post('channels/whatsapp/test-message') sendWhatsappTestMessage(@Body() body: { to?: string; text?: string }, @Headers('authorization') authorization?: string) { return this.saas.sendWhatsappTestMessage(authorization, body); }
   @Get('webhooks/meta') verifyMetaWebhook(@Query() query: { 'hub.mode'?: string; 'hub.verify_token'?: string; 'hub.challenge'?: string }) { return this.saas.verifyMetaWebhook(query); }
   @Post('webhooks/meta') receiveMetaWebhook(@Body() body: unknown, @Headers('x-hub-signature-256') signature?: string, @Headers('x-forwarded-for') forwardedFor?: string, @Req() request?: { rawBody?: Buffer; ip?: string }) { return this.saas.receiveMetaWebhook(body, signature, request?.rawBody, forwardedFor || request?.ip); }
+  @Post('meta/data-deletion') metaDataDeletion(@Body() body: { signed_request?: string }) { return this.saas.handleMetaDataDeletion(body); }
   @Get('admin/approvals') async listApprovals(@Headers('authorization') authorization?: string) { await this.saas.requireAdmin(authorization); return this.saas.listApprovals(); }
   @Get('admin/audit-logs') async listAuditLogs(@Headers('authorization') authorization?: string) { await this.saas.requireAdmin(authorization); return this.saas.listAuditLogs(); }
   @Get('admin/message-events/summary') async messageEventSummary(@Headers('authorization') authorization?: string) { await this.saas.requireAdmin(authorization); return this.saas.getMessageEventSummary(); }
