@@ -47,20 +47,27 @@ describe('Dify provisioning gateway configuration', () => {
         mode: 'live',
         ready: true,
         baseUrl: 'https://dify.example.com',
+        accountEndpoint: 'https://dify.example.com/inner/api/enterprise/account/ensure',
         workspaceEndpoint: 'https://dify.example.com/inner/api/enterprise/workspace',
         tokenConfigured: true,
-        requiresExistingDifyOwnerAccount: true
+        requiresExistingDifyOwnerAccount: false
       });
       expect(JSON.stringify(gateway.getStatus())).not.toContain('inner-secret');
     });
   });
 
-  it('calls the Dify inner enterprise workspace endpoint in live mode and maps the tenant id', async () => {
+  it('ensures the Dify owner account before creating the workspace in live mode', async () => {
     await withEnv({ DIFY_WORKSPACE_MODE: 'live', DIFY_BASE_URL: 'https://dify.example.com', DIFY_ADMIN_TOKEN: 'inner-secret' }, async () => {
-      const fetchMock = vi.fn().mockResolvedValue({
-        ok: true,
-        json: async () => ({ tenant: { id: 'tenant_live_123', name: 'Live Co', status: 'normal' } })
-      });
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({ account: { id: 'account_live_123', email: 'owner@live.co' }, created: true })
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({ tenant: { id: 'tenant_live_123', name: 'Live Co', status: 'normal' } })
+        });
       const previousFetch = global.fetch;
       global.fetch = fetchMock as unknown as typeof fetch;
 
@@ -68,12 +75,17 @@ describe('Dify provisioning gateway configuration', () => {
         const gateway = new DifyProvisioningGateway();
         const workspace = await gateway.ensureWorkspace({ organizationId: 'org_live', organizationName: 'Live Co', ownerUserId: 'usr_live', ownerEmail: 'owner@live.co' });
 
-        expect(fetchMock).toHaveBeenCalledWith('https://dify.example.com/inner/api/enterprise/workspace', {
+        expect(fetchMock).toHaveBeenNthCalledWith(1, 'https://dify.example.com/inner/api/enterprise/account/ensure', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Inner-Api-Key': 'inner-secret' },
+          body: JSON.stringify({ email: 'owner@live.co', name: 'owner' })
+        });
+        expect(fetchMock).toHaveBeenNthCalledWith(2, 'https://dify.example.com/inner/api/enterprise/workspace', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'X-Inner-Api-Key': 'inner-secret' },
           body: JSON.stringify({ name: 'Live Co', owner_email: 'owner@live.co' })
         });
-        expect(workspace).toEqual({ tenantId: 'tenant_live_123', accountId: 'usr_live' });
+        expect(workspace).toEqual({ tenantId: 'tenant_live_123', accountId: 'account_live_123' });
       } finally {
         global.fetch = previousFetch;
       }
@@ -82,18 +94,21 @@ describe('Dify provisioning gateway configuration', () => {
 
   it('turns Dify missing owner responses into an actionable provisioning error', async () => {
     await withEnv({ DIFY_WORKSPACE_MODE: 'live', DIFY_BASE_URL: 'https://dify.example.com', DIFY_ADMIN_TOKEN: 'inner-secret' }, async () => {
-      const fetchMock = vi.fn().mockResolvedValue({
-        ok: false,
-        status: 404,
-        json: async () => ({ message: 'owner account not found.' })
-      });
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValueOnce({ ok: true, json: async () => ({ account: { id: 'account_live_123' } }) })
+        .mockResolvedValueOnce({
+          ok: false,
+          status: 404,
+          json: async () => ({ message: 'owner account not found.' })
+        });
       const previousFetch = global.fetch;
       global.fetch = fetchMock as unknown as typeof fetch;
 
       try {
         const gateway = new DifyProvisioningGateway();
         await expect(gateway.ensureWorkspace({ organizationId: 'org_live', organizationName: 'Live Co', ownerUserId: 'usr_live', ownerEmail: 'owner@live.co' }))
-          .rejects.toThrow('Dify owner account owner@live.co was not found. Create or activate this account in Dify before retrying provisioning.');
+          .rejects.toThrow('Dify owner account owner@live.co was not found after account ensure. Check Dify account ensure endpoint before retrying provisioning.');
       } finally {
         global.fetch = previousFetch;
       }

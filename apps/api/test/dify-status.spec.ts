@@ -53,9 +53,10 @@ describe('Dify provisioning admin status', () => {
         mode: 'live',
         ready: true,
         baseUrl: 'https://dify.example.com',
+        accountEndpoint: 'https://dify.example.com/inner/api/enterprise/account/ensure',
         workspaceEndpoint: 'https://dify.example.com/inner/api/enterprise/workspace',
         tokenConfigured: true,
-        requiresExistingDifyOwnerAccount: true
+        requiresExistingDifyOwnerAccount: false
       });
       expect(JSON.stringify(response.body)).not.toContain('inner-secret');
     });

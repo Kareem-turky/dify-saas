@@ -125,7 +125,7 @@ Body: { "name": "Workspace name", "owner_email": "owner@example.com" }
 GET /provisioning/dify/status
 ```
 
-مهم: endpoint الحالي في Dify يحتاج owner account موجود ومفعّل مسبقًا بنفس البريد. لو الحساب غير موجود، provisioning job هيفشل برسالة واضحة للأدمن تطلب إنشاء/تفعيل الحساب داخل Dify ثم retry.
+مهم: النسخة المعدّلة من Dify تحتوي Inner API جديد لضمان/إنشاء owner account قبل إنشاء workspace، لذلك live provisioning لم يعد يحتاج إنشاء الحساب يدويًا طالما Dify محدّث والـ INNER_API_KEY مضبوط.
 
 ## AI Studio URL configuration
 

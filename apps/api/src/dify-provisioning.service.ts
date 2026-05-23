@@ -19,6 +19,7 @@ export interface DifyProvisioningStatus {
   mode: DifyWorkspaceMode;
   ready: boolean;
   baseUrl?: string;
+  accountEndpoint?: string;
   workspaceEndpoint?: string;
   tokenConfigured: boolean;
   requiresExistingDifyOwnerAccount: boolean;
@@ -62,6 +63,10 @@ function dueJobWhere(now: Date): Prisma.ProvisioningJobWhereInput {
   };
 }
 
+function ownerNameFromEmail(email: string) {
+  return email.split('@', 1)[0] || email;
+}
+
 @Injectable()
 export class DifyProvisioningGateway {
   private readonly config: DifyProvisioningConfig;
@@ -84,9 +89,10 @@ export class DifyProvisioningGateway {
       mode: 'live',
       ready: true,
       baseUrl: this.config.baseUrl,
+      accountEndpoint: this.accountEndpoint(),
       workspaceEndpoint: this.workspaceEndpoint(),
       tokenConfigured: Boolean(this.config.adminToken),
-      requiresExistingDifyOwnerAccount: true
+      requiresExistingDifyOwnerAccount: false
     };
   }
 
@@ -101,8 +107,16 @@ export class DifyProvisioningGateway {
     };
   }
 
+  private accountEndpoint(): string {
+    return new URL('/inner/api/enterprise/account/ensure', this.config.baseUrl).toString();
+  }
+
   private workspaceEndpoint(): string {
     return new URL('/inner/api/enterprise/workspace', this.config.baseUrl).toString();
+  }
+
+  private innerHeaders() {
+    return { 'Content-Type': 'application/json', 'X-Inner-Api-Key': this.config.adminToken! };
   }
 
   private async ensureLiveWorkspace(input: DifyWorkspaceInput): Promise<DifyWorkspaceResult> {
@@ -110,9 +124,25 @@ export class DifyProvisioningGateway {
       throw new Error('Dify live provisioning requires ownerEmail');
     }
 
+    const accountResponse = await fetch(this.accountEndpoint(), {
+      method: 'POST',
+      headers: this.innerHeaders(),
+      body: JSON.stringify({ email: input.ownerEmail, name: ownerNameFromEmail(input.ownerEmail) })
+    });
+    const accountData = await accountResponse.json().catch(() => ({}));
+    if (!accountResponse.ok) {
+      const message = typeof accountData?.message === 'string' ? accountData.message : `Dify account ensure failed with HTTP ${accountResponse.status}`;
+      throw new Error(message);
+    }
+
+    const accountId = accountData?.account?.id;
+    if (!accountId || typeof accountId !== 'string') {
+      throw new Error('Dify account ensure response did not include account.id');
+    }
+
     const response = await fetch(this.workspaceEndpoint(), {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Inner-Api-Key': this.config.adminToken! },
+      headers: this.innerHeaders(),
       body: JSON.stringify({ name: input.organizationName, owner_email: input.ownerEmail })
     });
 
@@ -120,7 +150,7 @@ export class DifyProvisioningGateway {
     if (!response.ok) {
       const difyMessage = typeof data?.message === 'string' ? data.message : '';
       if (response.status === 404 && difyMessage.toLowerCase().includes('owner account not found')) {
-        throw new Error(`Dify owner account ${input.ownerEmail} was not found. Create or activate this account in Dify before retrying provisioning.`);
+        throw new Error(`Dify owner account ${input.ownerEmail} was not found after account ensure. Check Dify account ensure endpoint before retrying provisioning.`);
       }
 
       const message = difyMessage || `Dify workspace creation failed with HTTP ${response.status}`;
@@ -132,7 +162,7 @@ export class DifyProvisioningGateway {
       throw new Error('Dify workspace creation response did not include tenant.id');
     }
 
-    return { tenantId, accountId: input.ownerUserId };
+    return { tenantId, accountId };
   }
 }
 
