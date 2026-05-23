@@ -24,3 +24,34 @@ h1{font-size:56px;line-height:1.05;margin:18px 0;letter-spacing:-.04em}h2{font-s
 .admin-table th{text-align:right;padding:12px 10px;color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.05em;border-bottom:1px solid var(--line)}
 .admin-table td{padding:10px;border-bottom:1px solid rgba(36,48,73,.5);vertical-align:middle}
 .admin-table tr:hover td{background:rgba(124,92,255,.04)}
+
+/* ─── Navbar ─── */
+.nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 24px;
+  border-bottom: 1px solid var(--line);
+  background: var(--bg);
+  position: sticky;
+  top: 0;
+  z-index: 100;
+}
+.nav .brand {
+  font-size: 1.15em;
+  font-weight: 700;
+  color: var(--brand);
+  text-decoration: none;
+}
+.nav .links {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+.nav .links a {
+  color: var(--text);
+  text-decoration: none;
+  font-size: 0.9em;
+  transition: color 0.2s;
+}
+.nav .links a:hover { color: var(--brand); }

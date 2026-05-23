@@ -1,43 +1,56 @@
 'use client';
 
-import { FormEvent, useState } from 'react';
+import { FormEvent, useState, useEffect, Suspense } from 'react';
+import { useAuth, RedirectIfAuth } from '../auth';
+import { useRouter, useSearchParams } from 'next/navigation';
 
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:4000';
-
-type LoginResponse = { token: string; user: { id: string; email: string; role: string; organizationId?: string | null } };
-
-export default function LoginPage(){
+function LoginContent() {
+  const { login, user } = useAuth();
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const [status, setStatus] = useState('');
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    if (user) {
+      const redirect = searchParams.get('redirect') || (user.role === 'admin' ? '/admin' : '/dashboard');
+      router.replace(redirect);
+    }
+  }, [user, router, searchParams]);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const form = new FormData(event.currentTarget);
     setStatus('جاري تسجيل الدخول...');
-    const response = await fetch(`${API_BASE}/auth/login`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email: String(form.get('email') || ''), password: String(form.get('password') || '') })
-    });
-    const data = await response.json().catch(() => ({}));
-    if (!response.ok) {
-      setStatus(data.message || 'فشل تسجيل الدخول');
-      return;
+    setError('');
+    const form = new FormData(event.currentTarget);
+    try {
+      const u = await login(String(form.get('email') || ''), String(form.get('password') || ''));
+      const redirect = searchParams.get('redirect') || (u.role === 'admin' ? '/admin' : '/dashboard');
+      router.push(redirect);
+    } catch (e) {
+      setStatus('');
+      setError(e instanceof Error ? e.message : 'فشل تسجيل الدخول');
     }
-    const login = data as LoginResponse;
-    localStorage.setItem('authToken', login.token);
-    if (login.user.organizationId) localStorage.setItem('dify_saas_organization_id', login.user.organizationId);
-    setStatus('تم تسجيل الدخول. جاري فتح الصفحة المناسبة...');
-    window.location.href = login.user.role === 'admin' ? '/admin' : '/dashboard';
   }
 
-  return <main className="shell form">
-    <h1>تسجيل الدخول</h1>
-    <p>ادخل بالإيميل والباسورد مرة واحدة، وبعدها الصفحات هتستخدم التوكن تلقائيًا.</p>
-    <form onSubmit={submit}>
-      <input name="email" type="email" className="input" placeholder="البريد الإلكتروني" required />
-      <input name="password" type="password" className="input" placeholder="كلمة المرور" required />
-      <button className="btn" type="submit">Login</button>
-    </form>
-    {status && <div className="item" style={{marginTop: 20}}><strong>{status}</strong></div>}
-  </main>;
+  return <RedirectIfAuth>
+    <main className="shell" style={{ maxWidth: 480, marginTop: 80 }}>
+      <div className="card glass">
+        <h1 style={{ textAlign: 'center' }}>تسجيل الدخول</h1>
+        <p style={{ textAlign: 'center' }}>ادخل بالإيميل والباسورد عشان تدخل لوحة التحكم</p>
+        <form onSubmit={submit} style={{ marginTop: 24 }}>
+          <input name="email" type="email" className="input" placeholder="البريد الإلكتروني" required />
+          <input name="password" type="password" className="input" placeholder="كلمة المرور" required />
+          <button className="btn" type="submit" style={{ width: '100%', marginTop: 8 }}>تسجيل الدخول</button>
+        </form>
+        {status && <p style={{ color: 'var(--brand2)', textAlign: 'center', marginTop: 12 }}>{status}</p>}
+        {error && <div className="item" style={{ marginTop: 12, borderColor: 'var(--bad)' }}><strong style={{ color: 'var(--bad)' }}>{error}</strong></div>}
+        <p style={{ textAlign: 'center', marginTop: 16 }}>معندكش حساب؟ <a href="/signup" style={{ color: 'var(--brand)' }}>سجل حساب جديد</a></p>
+      </div>
+    </main>
+  </RedirectIfAuth>;
+}
+
+export default function LoginPage() {
+  return <Suspense fallback={<main className="shell"><p>جاري التحميل...</p></main>}><LoginContent /></Suspense>;
 }
