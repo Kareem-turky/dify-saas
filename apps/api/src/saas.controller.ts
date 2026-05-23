@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Header, Headers, Param, Post, Put, Query, Req, UploadedFile, UseInterceptors } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Header, Headers, Param, Post, Put, Query, Req, UploadedFile, UseInterceptors } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
 import { DifyProvisioningGateway, DifyProvisioningService } from './dify-provisioning.service';
@@ -45,5 +45,20 @@ export class SaasController {
   @Get('provisioning/jobs') async jobs(@Headers('authorization') authorization?: string) { await this.saas.requireAdmin(authorization); return this.saas.listProvisioningJobs(); }
   @Post('provisioning/jobs/run-due') async runDueProvisioningJobs(@Headers('authorization') authorization?: string) { const admin = await this.saas.requireAdmin(authorization); return this.provisioning.runDueJobs(10, admin.id); }
   @Post('provisioning/jobs/:jobId/run') async runProvisioningJob(@Param('jobId') jobId: string, @Headers('authorization') authorization?: string) { const admin = await this.saas.requireAdmin(authorization); return this.provisioning.runJob(jobId, admin.id); }
+  // ─── Admin Plan Management
+  @Post('admin/plans') async createPlan(@Body() body: { name: string; monthlyPriceEgp: number; messageLimit: number; channelLimit: number; seatLimit: number; requiresManualApproval: boolean }, @Headers('authorization') authorization?: string) { await this.saas.requireAdmin(authorization); return this.saas.adminCreatePlan(body); }
+  @Put('admin/plans/:planId') async updatePlan(@Param('planId') planId: string, @Body() body: Partial<{ name: string; monthlyPriceEgp: number; messageLimit: number; channelLimit: number; seatLimit: number; requiresManualApproval: boolean }>, @Headers('authorization') authorization?: string) { await this.saas.requireAdmin(authorization); return this.saas.adminUpdatePlan(planId, body); }
+  @Delete('admin/plans/:planId') async deletePlan(@Param('planId') planId: string, @Headers('authorization') authorization?: string) { await this.saas.requireAdmin(authorization); return this.saas.adminDeletePlan(planId); }
+
+  // ─── Admin User Management
+  @Get('admin/users') async listUsers(@Headers('authorization') authorization?: string) { await this.saas.requireAdmin(authorization); return this.saas.adminListUsers(); }
+  @Put('admin/users/:userId') async updateUser(@Param('userId') userId: string, @Body() body: { role?: string; status?: string }, @Headers('authorization') authorization?: string) { await this.saas.requireAdmin(authorization); return this.saas.adminUpdateUser(userId, body); }
+
+  // ─── Content Management
+  @Put('admin/content/:key') async setContent(@Param('key') key: string, @Body() body: { value: string; type?: string }, @Headers('authorization') authorization?: string) { await this.saas.requireAdmin(authorization); return this.saas.setContentBlock(key, body.value, body.type); }
+  @Get('admin/content') async listContent(@Headers('authorization') authorization?: string) { await this.saas.requireAdmin(authorization); return this.saas.listContentBlocks(); }
+  @Delete('admin/content/:key') async deleteContent(@Param('key') key: string, @Headers('authorization') authorization?: string) { await this.saas.requireAdmin(authorization); return this.saas.deleteContentBlock(key); }
+  @Get('content') listPublicContent() { return this.saas.listContentBlocks(); }
+
   @Get('organizations/:organizationId/dashboard') dashboard(@Param('organizationId') organizationId: string) { return this.saas.getOrganizationDashboard(organizationId); }
 }

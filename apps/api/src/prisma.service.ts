@@ -46,6 +46,7 @@ export class PrismaService extends PrismaClient implements OnModuleInit, OnModul
   }
 
   async resetForTests() {
+    await this.contentBlock.deleteMany();
     await this.auditLog.deleteMany();
     await this.messageEvent.deleteMany();
     await this.channel.deleteMany();

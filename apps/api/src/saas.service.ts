@@ -1660,4 +1660,56 @@ export class SaasService {
       } : null
     };
   }
+
+  // ─── Admin Plan Management ─────────────────────────────────
+  async adminCreatePlan(input: { name: string; monthlyPriceEgp: number; messageLimit: number; channelLimit: number; seatLimit: number; requiresManualApproval: boolean }) {
+    const id = `plan_${input.name.toLowerCase().replace(/[^a-z0-9]+/g, '_')}_${Date.now()}`;
+    return this.db.plan.create({ data: { id, ...input } });
+  }
+
+  async adminUpdatePlan(planId: string, input: Partial<{ name: string; monthlyPriceEgp: number; messageLimit: number; channelLimit: number; seatLimit: number; requiresManualApproval: boolean }>) {
+    const plan = await this.db.plan.findUnique({ where: { id: planId } });
+    if (!plan) throw new BadRequestException('Plan not found');
+    return this.db.plan.update({ where: { id: planId }, data: input });
+  }
+
+  async adminDeletePlan(planId: string) {
+    const subs = await this.db.subscription.count({ where: { planId } });
+    if (subs > 0) throw new BadRequestException('Cannot delete plan with active subscriptions');
+    await this.db.plan.delete({ where: { id: planId } });
+    return { deleted: true };
+  }
+
+  // ─── Admin User Management ─────────────────────────────────
+  async adminListUsers() {
+    return this.db.user.findMany({
+      include: { organization: { select: { id: true, name: true, status: true } } },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  async adminUpdateUser(userId: string, input: { role?: string; status?: string }) {
+    const user = await this.db.user.findUnique({ where: { id: userId } });
+    if (!user) throw new BadRequestException('User not found');
+    const updated = await this.db.user.update({ where: { id: userId }, data: input, include: { organization: { select: { id: true, name: true, status: true } } } });
+    return { user: updated };
+  }
+
+  // ─── Content Management ────────────────────────────────────
+  async setContentBlock(key: string, value: string, type = 'text') {
+    return this.db.contentBlock.upsert({
+      where: { key },
+      update: { value, type },
+      create: { id: `cb_${key}_${Date.now()}`, key, value, type },
+    });
+  }
+
+  async listContentBlocks() {
+    return this.db.contentBlock.findMany({ orderBy: { key: 'asc' } });
+  }
+
+  async deleteContentBlock(key: string) {
+    await this.db.contentBlock.delete({ where: { key } }).catch(() => {});
+    return { deleted: true };
+  }
 }

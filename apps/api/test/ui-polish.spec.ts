@@ -16,7 +16,7 @@ describe('MVP UI polish source checks', () => {
     }
   });
 
-  it('shows operational guidance in customer dashboard and admin readiness views', () => {
+  it('shows operational guidance in customer dashboard and admin views', () => {
     const dashboard = read('apps/web/app/dashboard/page.tsx');
     const admin = read('apps/web/app/admin/page.tsx');
     expect(dashboard).toContain('MVP launch checklist');
@@ -24,15 +24,16 @@ describe('MVP UI polish source checks', () => {
     expect(dashboard).toContain('progress-bar');
     expect(dashboard).toContain('/receipt.html');
     expect(dashboard).toContain('Print receipt');
-    expect(admin).toContain('Ops command center');
-    expect(admin).toContain('Production readiness');
+    // Admin dashboard now has tabbed CMS interface
+    expect(admin).toContain('admin console');
+    expect(admin).toContain('admin-tabs');
     expect(admin).toContain('status-pill');
-    for (const copy of ['Admin cockpit', 'Revenue reviewed', 'Provisioning SLA', 'Live risk monitor']) {
-      expect(admin).toContain(copy);
-    }
-    for (const implementation of ['reviewFilter', 'filteredApprovals', 'admin-dashboard-grid', 'ops-checklist']) {
-      expect(admin).toContain(implementation);
-    }
+    expect(admin).toContain('خطط التسعير');
+    expect(admin).toContain('المستخدمين');
+    expect(admin).toContain('إدارة المحتوى');
+    expect(admin).toContain('admin-dashboard-grid');
+    expect(admin).toContain('admin-table');
+    expect(admin).toContain('retryFailedMessages');
   });
 
   it('has a Meta-ready data deletion instructions page for app review', () => {

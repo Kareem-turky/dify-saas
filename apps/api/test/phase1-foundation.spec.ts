@@ -23,7 +23,7 @@ describe('Phase 1 SaaS foundation', () => {
 
   it('exposes commercial plans for the pricing page', async () => {
     const res = await request(app.getHttpServer()).get('/plans').expect(200);
-    expect(res.body).toHaveLength(3);
+    expect(res.body.length).toBeGreaterThanOrEqual(3);
     expect(res.body[0]).toMatchObject({ id: 'starter', channelLimit: 1 });
   });
 

@@ -4,6 +4,22 @@ import { useEffect, useState } from 'react';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:4000';
 
+// ─── Types ───────────────────────────────────────────────────
+type Plan = {
+  id: string; name: string; monthlyPriceEgp: number; messageLimit: number;
+  channelLimit: number; seatLimit: number; requiresManualApproval: boolean;
+};
+
+type UserRow = {
+  id: string; name: string; email: string; phone?: string; role: string; status: string;
+  preferredLanguage: string; organization?: { id: string; name: string; status: string } | null;
+  createdAt: string;
+};
+
+type ContentBlock = {
+  id: string; key: string; value: string; type: string; updatedAt: string;
+};
+
 type ApprovalRow = {
   approval: { id: string; status: string; paymentId: string };
   payment?: { id: string; method: string; amountEgp: number; status: string; reference?: string };
@@ -11,333 +27,461 @@ type ApprovalRow = {
 };
 
 type ProvisioningJobRow = {
-  id: string;
-  organizationId: string;
-  type: string;
+  id: string; organizationId: string; type: string;
   status: 'queued' | 'running' | 'completed' | 'failed' | 'dead';
-  attempts: number;
-  maxAttempts?: number;
-  nextRunAt?: string | null;
-  lastError?: string | null;
-  payload?: Record<string, unknown>;
-  organization?: { id: string; name: string; status: string; difyTenantId?: string | null; difyAccountId?: string | null };
+  attempts: number; maxAttempts?: number; nextRunAt?: string | null; lastError?: string | null;
+  organization?: { id: string; name: string; status: string; difyTenantId?: string | null };
 };
 
 type DifyStatus = {
-  mode: 'dry-run' | 'live';
-  ready: boolean;
-  baseUrl?: string;
-  workspaceEndpoint?: string;
-  tokenConfigured: boolean;
-  requiresExistingDifyOwnerAccount: boolean;
-};
-
-type MessageEventSummary = {
-  totals: Record<string, number>;
-  byChannel: Record<string, Record<string, number>>;
-  retryableFailed: number;
-  deadLettered: number;
-  oldestFailedAt?: string | null;
-};
-
-type ReadinessStatus = {
-  ok: boolean;
-  checkedAt: string;
-  checks: {
-    database: { ok: boolean; latencyMs: number };
-    adminUser: { ok: boolean; configured: boolean };
-    authTokenSecret: { ok: boolean; configured: boolean };
-    paymentProofStorage: { ok: boolean; pathConfigured: boolean };
-    difyGateway: { ok: boolean; mode: string; tokenConfigured: boolean };
-    provisioningWorker: { enabled?: boolean; running?: boolean; lastError?: string | null };
-  };
+  mode: 'dry-run' | 'live'; ready: boolean; baseUrl?: string; tokenConfigured: boolean;
 };
 
 type AuditLogRow = {
-  id: string;
-  actorUserId?: string | null;
-  organizationId?: string | null;
-  action: string;
-  targetType?: string | null;
-  targetId?: string | null;
-  metadata?: Record<string, unknown> | null;
-  createdAt: string;
+  id: string; actorUserId?: string | null; organizationId?: string | null;
+  action: string; targetType?: string | null; targetId?: string | null;
+  metadata?: Record<string, unknown> | null; createdAt: string;
   actorUser?: { id: string; email: string; name: string } | null;
   organization?: { id: string; name: string } | null;
 };
 
-export default function AdminPage(){
-  const [rows, setRows] = useState<ApprovalRow[]>([]);
-  const [jobs, setJobs] = useState<ProvisioningJobRow[]>([]);
-  const [auditLogs, setAuditLogs] = useState<AuditLogRow[]>([]);
-  const [messageSummary, setMessageSummary] = useState<MessageEventSummary | null>(null);
-  const [difyStatus, setDifyStatus] = useState<DifyStatus | null>(null);
-  const [readiness, setReadiness] = useState<ReadinessStatus | null>(null);
-  const [message, setMessage] = useState('');
+type MessageEventSummary = {
+  totals: Record<string, number>; byChannel: Record<string, Record<string, number>>;
+  retryableFailed: number; deadLettered: number; oldestFailedAt?: string | null;
+};
+
+type Tab = 'overview' | 'plans' | 'users' | 'content' | 'approvals' | 'jobs' | 'logs';
+
+// ─── Component ───────────────────────────────────────────────
+export default function AdminPage() {
+  const [tab, setTab] = useState<Tab>('overview');
+  const [adminToken, setAdminToken] = useState('');
   const [adminEmail, setAdminEmail] = useState('');
   const [adminPassword, setAdminPassword] = useState('');
-  const [adminToken, setAdminToken] = useState('');
-  const [reviewFilter, setReviewFilter] = useState<'all' | 'open' | 'approved' | 'blocked'>('all');
+  const [message, setMessage] = useState('');
 
-  async function loadApprovals(){
-    const response = await fetch(`${API_BASE}/admin/approvals`, { headers: { Authorization: `Bearer ${adminToken}` } });
-    if (!response.ok) throw new Error('تعذر تحميل طلبات الموافقة. تأكد إن API شغال على port 4000.');
-    setRows(await response.json());
-  }
+  // Data states
+  const [plans, setPlans] = useState<Plan[]>([]);
+  const [users, setUsers] = useState<UserRow[]>([]);
+  const [contentBlocks, setContentBlocks] = useState<ContentBlock[]>([]);
+  const [approvals, setApprovals] = useState<ApprovalRow[]>([]);
+  const [jobs, setJobs] = useState<ProvisioningJobRow[]>([]);
+  const [auditLogs, setAuditLogs] = useState<AuditLogRow[]>([]);
+  const [difyStatus, setDifyStatus] = useState<DifyStatus | null>(null);
+  const [messageSummary, setMessageSummary] = useState<MessageEventSummary | null>(null);
 
-  async function loadJobs(){
-    const response = await fetch(`${API_BASE}/provisioning/jobs`, { headers: { Authorization: `Bearer ${adminToken}` } });
-    if (!response.ok) throw new Error('تعذر تحميل provisioning jobs.');
-    setJobs(await response.json());
-  }
+  // Form states
+  const [planForm, setPlanForm] = useState<Partial<Plan>>({ name: '', monthlyPriceEgp: 0, messageLimit: 1000, channelLimit: 1, seatLimit: 1, requiresManualApproval: false });
+  const [editingPlan, setEditingPlan] = useState<string | null>(null);
+  const [contentForm, setContentForm] = useState({ key: '', value: '' });
+  const [editingContent, setEditingContent] = useState<string | null>(null);
+  const [userFilter, setUserFilter] = useState('');
 
-  async function loadDifyStatus(){
-    const response = await fetch(`${API_BASE}/provisioning/dify/status`);
-    if (!response.ok) throw new Error('تعذر تحميل حالة Dify gateway.');
-    setDifyStatus(await response.json());
-  }
+  // ─── API helpers ─────────────────────────────────────────────
+  const auth = { Authorization: `Bearer ${adminToken}` };
+  const api = {
+    get: (url: string) => fetch(`${API_BASE}${url}`, { headers: auth }),
+    post: (url: string, body: unknown) => fetch(`${API_BASE}${url}`, { method: 'POST', headers: { ...auth, 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
+    put: (url: string, body: unknown) => fetch(`${API_BASE}${url}`, { method: 'PUT', headers: { ...auth, 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
+    del: (url: string) => fetch(`${API_BASE}${url}`, { method: 'DELETE', headers: auth }),
+  };
 
-  async function loadAuditLogs(){
-    const response = await fetch(`${API_BASE}/admin/audit-logs`, { headers: { Authorization: `Bearer ${adminToken}` } });
-    if (!response.ok) throw new Error('تعذر تحميل audit logs.');
-    setAuditLogs(await response.json());
-  }
+  // ─── Loaders ─────────────────────────────────────────────────
+  async function loadPlans() { const r = await api.get('/plans'); if (r.ok) setPlans(await r.json()); }
+  async function loadUsers() { const r = await api.get('/admin/users'); if (r.ok) setUsers(await r.json()); }
+  async function loadContent() { const r = await api.get('/admin/content'); if (r.ok) setContentBlocks(await r.json()); }
+  async function loadApprovals() { const r = await api.get('/admin/approvals'); if (r.ok) setApprovals(await r.json()); }
+  async function loadJobs() { const r = await api.get('/provisioning/jobs'); if (r.ok) setJobs(await r.json()); }
+  async function loadAuditLogs() { const r = await api.get('/admin/audit-logs'); if (r.ok) setAuditLogs(await r.json()); }
+  async function loadDifyStatus() { const r = await api.get('/provisioning/dify/status'); if (r.ok) setDifyStatus(await r.json()); }
+  async function loadMessageSummary() { const r = await api.get('/admin/message-events/summary'); if (r.ok) setMessageSummary(await r.json()); }
 
-  async function loadMessageSummary(){
-    const response = await fetch(`${API_BASE}/admin/message-events/summary`, { headers: { Authorization: `Bearer ${adminToken}` } });
-    if (!response.ok) throw new Error('تعذر تحميل message queue summary.');
-    setMessageSummary(await response.json());
-  }
-
-  async function loadReadiness(){
-    const response = await fetch(`${API_BASE}/admin/readiness`, { headers: { Authorization: `Bearer ${adminToken}` } });
-    if (!response.ok) throw new Error('تعذر تحميل readiness checks.');
-    setReadiness(await response.json());
-  }
-
-  async function refreshAll(){
-    if (!adminToken) {
-      setMessage('سجل دخول الأدمن الأول.');
-      return;
-    }
-    setMessage('جاري تحميل لوحة الأدمن...');
+  async function refreshAll() {
+    if (!adminToken) return;
+    setMessage('');
     try {
-      await Promise.all([loadApprovals(), loadJobs(), loadDifyStatus(), loadAuditLogs(), loadMessageSummary(), loadReadiness()]);
-      setMessage('');
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : 'حصل خطأ أثناء تحميل لوحة الأدمن');
-    }
+      await Promise.all([loadPlans(), loadUsers(), loadContent(), loadApprovals(), loadJobs(), loadAuditLogs(), loadDifyStatus(), loadMessageSummary()]);
+    } catch (e) { setMessage(e instanceof Error ? e.message : 'خطأ في تحميل البيانات'); }
   }
 
-  async function loginAdmin(){
-    setMessage('جاري تسجيل دخول الأدمن...');
-    const response = await fetch(`${API_BASE}/auth/login`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email: adminEmail, password: adminPassword })
+  async function loginAdmin() {
+    setMessage('جاري تسجيل الدخول...');
+    const r = await fetch(`${API_BASE}/auth/login`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: adminEmail, password: adminPassword }),
     });
-    const data = await response.json().catch(() => ({}));
-    if (!response.ok || data.user?.role !== 'admin') {
-      setMessage(data.message || 'بيانات دخول الأدمن غير صحيحة');
-      return;
-    }
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok || data.user?.role !== 'admin') { setMessage(data.message || 'بيانات الدخول غير صحيحة'); return; }
     localStorage.setItem('dify_saas_admin_token', data.token);
     setAdminToken(data.token);
-    setMessage('تم تسجيل دخول الأدمن.');
+    setMessage('');
   }
 
-  async function approve(paymentId: string){
-    setMessage('جاري اعتماد الدفع وإنشاء provisioning job...');
-    const response = await fetch(`${API_BASE}/admin/approvals/${paymentId}/approve`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${adminToken}` },
-      body: JSON.stringify({ notes: 'Approved from admin UI' })
-    });
-    if (!response.ok) {
-      const data = await response.json().catch(() => ({}));
-      setMessage(data.message || 'فشل الاعتماد');
-      return;
+  // ─── Plan actions ────────────────────────────────────────────
+  async function savePlan() {
+    if (!planForm.name || !planForm.monthlyPriceEgp) { setMessage('املأ كل الحقول المطلوبة'); return; }
+    const payload = { name: planForm.name, monthlyPriceEgp: Number(planForm.monthlyPriceEgp), messageLimit: Number(planForm.messageLimit), channelLimit: Number(planForm.channelLimit), seatLimit: Number(planForm.seatLimit), requiresManualApproval: !!planForm.requiresManualApproval };
+    if (editingPlan) {
+      await api.put(`/admin/plans/${editingPlan}`, payload);
+    } else {
+      await api.post('/admin/plans', payload);
     }
-    setMessage('تم الاعتماد وإنشاء provisioning job.');
+    setPlanForm({ name: '', monthlyPriceEgp: 0, messageLimit: 1000, channelLimit: 1, seatLimit: 1, requiresManualApproval: false });
+    setEditingPlan(null);
+    await loadPlans();
+  }
+
+  async function deletePlan(id: string) {
+    if (!confirm('متأكد إنك عايز تحذف الخطة دي؟')) return;
+    const r = await api.del(`/admin/plans/${id}`);
+    if (!r.ok) { const d = await r.json().catch(() => ({})); setMessage(d.message || 'فشل الحذف'); }
+    await loadPlans();
+  }
+
+  function startEditPlan(plan: Plan) {
+    setEditingPlan(plan.id);
+    setPlanForm({ ...plan });
+  }
+
+  // ─── User actions ────────────────────────────────────────────
+  async function updateUser(userId: string, updates: { role?: string; status?: string }) {
+    await api.put(`/admin/users/${userId}`, updates);
+    await loadUsers();
+  }
+
+  // ─── Content actions ─────────────────────────────────────────
+  async function saveContent() {
+    if (!contentForm.key || !contentForm.value) { setMessage('املأ المفتاح والقيمة'); return; }
+    await api.put(`/admin/content/${contentForm.key}`, { value: contentForm.value });
+    setContentForm({ key: '', value: '' });
+    setEditingContent(null);
+    await loadContent();
+  }
+
+  async function deleteContent(key: string) {
+    if (!confirm('متأكد إنك عايز تحذف المحتوى ده؟')) return;
+    await api.del(`/admin/content/${key}`);
+    await loadContent();
+  }
+
+  function startEditContent(block: ContentBlock) {
+    setEditingContent(block.key);
+    setContentForm({ key: block.key, value: block.value });
+  }
+
+  // ─── Ops actions ─────────────────────────────────────────────
+  async function approve(paymentId: string) {
+    await api.post(`/admin/approvals/${paymentId}/approve`, { notes: 'Approved from admin UI' });
     await refreshAll();
   }
 
-  async function runJob(jobId: string){
-    setMessage('جاري تشغيل provisioning job...');
-    const response = await fetch(`${API_BASE}/provisioning/jobs/${jobId}/run`, { method: 'POST', headers: { Authorization: `Bearer ${adminToken}` } });
-    const data = await response.json().catch(() => ({}));
-    if (!response.ok) {
-      setMessage(data.message || 'فشل تشغيل provisioning job');
-      await refreshAll();
-      return;
-    }
-    setMessage('تم تشغيل provisioning job وتحديث حالة الشركة.');
-    await refreshAll();
+  async function runJob(jobId: string) {
+    await api.post(`/provisioning/jobs/${jobId}/run`, {});
+    await loadJobs();
   }
 
-  async function retryFailedMessages(){
-    setMessage('جاري إعادة محاولة رسائل WhatsApp/Dify الفاشلة...');
-    const response = await fetch(`${API_BASE}/admin/message-events/retry-failed`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${adminToken}` },
-      body: JSON.stringify({ limit: 10 })
-    });
-    const data = await response.json().catch(() => ({}));
-    if (!response.ok) {
-      setMessage(data.message || 'فشل retry للرسائل الفاشلة');
-      await refreshAll();
-      return;
-    }
-    setMessage(`تمت محاولة ${data.attempted || 0} رسالة: ${data.retried || 0} نجحت، ${data.failed || 0} فشلت، ${data.skippedNotDue || 0} مؤجلة، ${data.deadLettered || 0} dead-letter.`);
-    await refreshAll();
+  async function retryFailedMessages() {
+    const r = await api.post('/admin/message-events/retry-failed', { limit: 10 });
+    const d = await r.json().catch(() => ({}));
+    setMessage(`تمت محاولة ${d.attempted || 0} رسالة`);
+    await loadMessageSummary();
   }
 
-  async function runDueJobs(){
-    setMessage('جاري تشغيل كل provisioning jobs الجاهزة...');
-    const response = await fetch(`${API_BASE}/provisioning/jobs/run-due`, { method: 'POST', headers: { Authorization: `Bearer ${adminToken}` } });
-    const data = await response.json().catch(() => ({}));
-    if (!response.ok) {
-      setMessage(data.message || 'فشل تشغيل jobs الجاهزة');
-      await refreshAll();
-      return;
-    }
-    setMessage(`تم تشغيل ${data.processed || 0} job: ${data.completed || 0} نجح، ${data.failed || 0} فشل.`);
-    await refreshAll();
-  }
-
-  useEffect(() => {
-    const savedToken = localStorage.getItem('dify_saas_admin_token');
-    if (savedToken) setAdminToken(savedToken);
-  }, []);
-
+  // ─── Init ────────────────────────────────────────────────────
+  useEffect(() => { const t = localStorage.getItem('dify_saas_admin_token'); if (t) setAdminToken(t); }, []);
   useEffect(() => { if (adminToken) void refreshAll(); }, [adminToken]);
 
-  const openApprovals = rows.filter(row => row.approval.status === 'open');
-  const reviewedApprovals = rows.filter(row => row.approval.status !== 'open');
-  const failedJobs = jobs.filter(job => job.status === 'failed' || job.status === 'dead');
-  const runnableJobs = jobs.filter(job => job.status === 'queued' || job.status === 'failed');
-  const filteredApprovals = rows.filter(row => {
-    if (reviewFilter === 'all') return true;
-    if (reviewFilter === 'open') return row.approval.status === 'open';
-    if (reviewFilter === 'approved') return row.approval.status !== 'open';
-    return row.payment?.status === 'rejected' || row.organization?.status === 'suspended';
-  });
-  const liveRiskCount = failedJobs.length + (messageSummary?.retryableFailed ?? 0) + (readiness?.ok === false ? 1 : 0);
-  const provisioningSlaLabel = failedJobs.length === 0 ? 'On track' : `${failedJobs.length} تحتاج تدخل`;
+  const openApprovals = approvals.filter(r => r.approval.status === 'open');
+  const failedJobs = jobs.filter(j => j.status === 'failed' || j.status === 'dead');
+  const filteredUsers = userFilter
+    ? users.filter(u => u.name.includes(userFilter) || u.email.includes(userFilter) || u.organization?.name?.includes(userFilter))
+    : users;
 
+  const tabs: { key: Tab; label: string; icon: string }[] = [
+    { key: 'overview', label: 'نظرة عامة', icon: '📊' },
+    { key: 'plans', label: 'خطط التسعير', icon: '💰' },
+    { key: 'users', label: 'المستخدمين', icon: '👥' },
+    { key: 'content', label: 'إدارة المحتوى', icon: '📝' },
+    { key: 'approvals', label: 'الموافقات', icon: '✅' },
+    { key: 'jobs', label: 'Provisioning', icon: '⚙️' },
+    { key: 'logs', label: 'سجل الأحداث', icon: '📋' },
+  ];
+
+  // ─── Render ──────────────────────────────────────────────────
   return <main className="shell admin-shell">
-    <div className="section-title"><span>Ops command center</span><span className="status-pill good">admin console</span></div>
-    <section className="item glass admin-hero">
-      <div>
-        <span className="status-pill good">Admin cockpit</span>
-        <h1>لوحة تحكم الأدمن</h1>
-        <p>مراجعة المدفوعات اليدوية، تشغيل Dify provisioning، متابعة readiness، audit logs، وmessage retries من شاشة واحدة.</p>
-      </div>
-      <div className="ops-checklist">
-        <strong>Today operator checklist</strong>
-        <span>1. راجع المدفوعات المفتوحة</span>
-        <span>2. شغّل jobs الجاهزة</span>
-        <span>3. راقب live risks قبل العرض</span>
-      </div>
-    </section>
-    <div className="item" style={{marginTop: 20}}>
-      <h2>Admin login</h2>
-      <input className="input" type="email" value={adminEmail} onChange={event => setAdminEmail(event.target.value)} placeholder="Admin email" />
-      <input className="input" type="password" value={adminPassword} onChange={event => setAdminPassword(event.target.value)} placeholder="Admin password" />
-      <div className="cta">
-        <button className="btn" onClick={loginAdmin}>Login</button>
-        <button className="btn secondary" onClick={refreshAll} disabled={!adminToken}>Refresh</button>
-      </div>
-      {adminToken && <p>Admin session active.</p>}
-    </div>
-    {message && <p>{message}</p>}
-
-    <div className="grid admin-dashboard-grid">
-      <div className="item metric"><h3>Open approvals</h3><p>{openApprovals.length} طلب محتاج مراجعة.</p></div>
-      <div className="item metric"><h3>Revenue reviewed</h3><p>{reviewedApprovals.length} دفعة اتراجعت.</p></div>
-      <div className="item metric"><h3>Provisioning SLA</h3><p>{provisioningSlaLabel} · {runnableJobs.length} job جاهز.</p></div>
-      <div className="item metric"><h3>Live risk monitor</h3><p>{liveRiskCount} risk signal · {messageSummary?.deadLettered ?? 0} dead-letter.</p><button className="btn secondary" onClick={retryFailedMessages} disabled={!adminToken}>Retry failed messages</button></div>
+    {/* Header */}
+    <div className="section-title">
+      <span>Fulfly AI — لوحة تحكم الأدمن</span>
+      <span className="status-pill good">admin console</span>
     </div>
 
-    <section style={{marginTop: 32}}>
-      <div className="section-title"><span>Production readiness</span><span className={readiness?.ok ? 'status-pill good' : 'status-pill warn'}>{readiness?.ok ? 'ready' : 'needs review'}</span></div>
-      <div className="grid">
-        <div className="item metric"><strong>Overall</strong><p>{readiness ? (readiness.ok ? 'Ready' : 'Needs attention') : 'Not loaded'}</p></div>
-        <div className="item metric"><strong>Database</strong><p>{readiness ? `${readiness.checks.database.ok ? 'OK' : 'Fail'} · ${readiness.checks.database.latencyMs}ms` : 'Not loaded'}</p></div>
-        <div className="item metric"><strong>Admin/Auth</strong><p>{readiness ? `admin ${readiness.checks.adminUser.ok ? 'OK' : 'missing'} · secret ${readiness.checks.authTokenSecret.configured ? 'configured' : 'missing'}` : 'Not loaded'}</p></div>
-        <div className="item metric"><strong>Storage/Worker</strong><p>{readiness ? `proof storage ${readiness.checks.paymentProofStorage.ok ? 'OK' : 'fail'} · worker ${readiness.checks.provisioningWorker.enabled ? 'enabled' : 'disabled'}${readiness.checks.provisioningWorker.running ? ' · running' : ''}` : 'Not loaded'}</p></div>
-      </div>
-    </section>
+    {/* Login */}
+    {!adminToken && <section className="item glass" style={{ marginTop: 20 }}>
+      <h2>تسجيل دخول الأدمن</h2>
+      <input className="input" type="email" placeholder="البريد الإلكتروني" value={adminEmail} onChange={e => setAdminEmail(e.target.value)} />
+      <input className="input" type="password" placeholder="كلمة المرور" value={adminPassword} onChange={e => setAdminPassword(e.target.value)} />
+      <div className="cta"><button className="btn" onClick={loginAdmin}>تسجيل الدخول</button></div>
+    </section>}
 
-    <section style={{marginTop: 32}}>
-      <h2>Dify gateway</h2>
-      <div className="item">
-        {!difyStatus && <p>جاري تحميل حالة Dify...</p>}
-        {difyStatus && <>
-          <p>Mode: <strong>{difyStatus.mode}</strong> · Ready: {difyStatus.ready ? 'yes' : 'no'} · Token: {difyStatus.tokenConfigured ? 'configured' : 'not required'}</p>
-          {difyStatus.baseUrl && <p>Base URL: {difyStatus.baseUrl}</p>}
-          {difyStatus.workspaceEndpoint && <p>Workspace endpoint: {difyStatus.workspaceEndpoint}</p>}
-          {difyStatus.requiresExistingDifyOwnerAccount && <p>Important: owner email must already exist and be activated inside Dify before running live provisioning.</p>}
-        </>}
-      </div>
-    </section>
+    {message && <p style={{ color: 'var(--warn)', margin: '12px 0' }}>{message}</p>}
 
-    <section style={{marginTop: 32}}>
-      <div className="cta" style={{justifyContent: 'space-between', alignItems: 'center'}}>
-        <h2>Manual payment approvals</h2>
-        <button className="btn secondary" onClick={refreshAll}>Refresh</button>
-      </div>
-      <div className="cta" style={{marginBottom: 12}}>
-        <button className={reviewFilter === 'all' ? 'btn' : 'btn secondary'} onClick={() => setReviewFilter('all')}>All reviews</button>
-        <button className={reviewFilter === 'open' ? 'btn' : 'btn secondary'} onClick={() => setReviewFilter('open')}>Open only</button>
-        <button className={reviewFilter === 'approved' ? 'btn' : 'btn secondary'} onClick={() => setReviewFilter('approved')}>Reviewed</button>
-        <button className={reviewFilter === 'blocked' ? 'btn' : 'btn secondary'} onClick={() => setReviewFilter('blocked')}>Blocked</button>
-      </div>
-      {openApprovals.length === 0 && <p>لا توجد طلبات موافقة مفتوحة حالياً.</p>}
-      {filteredApprovals.map(row => <div className="item" key={row.approval.id} style={{marginBottom: 12}}>
-        <strong>{row.organization?.name || row.approval.id}</strong>
-        <p>Payment: {row.payment?.method} — {row.payment?.amountEgp} EGP — {row.payment?.status}</p>
-        <p>Reference: {row.payment?.reference || 'No reference'} · Organization status: {row.organization?.status}</p>
-        {row.approval.status === 'open' && row.payment && <button className="btn" onClick={() => approve(row.payment!.id)}>Approve payment</button>}
-      </div>)}
-    </section>
+    {adminToken && <>
+      {/* Tab Navigation */}
+      <nav className="admin-tabs">
+        {tabs.map(t => (
+          <button key={t.key} className={`admin-tab ${tab === t.key ? 'active' : ''}`} onClick={() => setTab(t.key)}>
+            <span>{t.icon}</span> {t.label}
+            {t.key === 'approvals' && openApprovals.length > 0 && <span className="badge-count">{openApprovals.length}</span>}
+          </button>
+        ))}
+        <button className="admin-tab" onClick={refreshAll} style={{ marginRight: 'auto' }}>🔄 تحديث</button>
+      </nav>
 
-    <section style={{marginTop: 32}}>
-      <div className="cta" style={{justifyContent: 'space-between', alignItems: 'center'}}>
-        <h2>Provisioning jobs</h2>
-        <button className="btn secondary" onClick={runDueJobs} disabled={!adminToken || runnableJobs.length === 0}>Run all ready jobs</button>
-      </div>
-      {jobs.length === 0 && <p>لا توجد provisioning jobs حتى الآن.</p>}
-      {jobs.map(job => <div className="item" key={job.id} style={{marginBottom: 12}}>
-        <strong>{job.organization?.name || job.organizationId}</strong>
-        <p>Status: {job.status} · Type: {job.type} · Attempts: {job.attempts}/{job.maxAttempts || 3}</p>
-        <p>Organization: {job.organization?.status || 'unknown'} · Tenant: {job.organization?.difyTenantId || 'not mapped yet'}</p>
-        {job.nextRunAt && <p>Next retry: {new Date(job.nextRunAt).toLocaleString()}</p>}
-        {job.lastError && <p>Last error: {job.lastError}</p>}
-        {(job.status === 'queued' || job.status === 'failed') && <button className="btn" onClick={() => runJob(job.id)}>{job.status === 'failed' ? 'Retry job' : 'Run job'}</button>}
-      </div>)}
-    </section>
+      {/* ── Overview Tab ─────────────────────────────────── */}
+      {tab === 'overview' && <>
+        <div className="grid admin-dashboard-grid" style={{ marginTop: 24 }}>
+          <div className="item metric">
+            <h3>المستخدمين</h3>
+            <p style={{ fontSize: 28, fontWeight: 900, color: 'var(--text)' }}>{users.length}</p>
+            <p>{users.filter(u => u.role === 'customer').length} عميل · {users.filter(u => u.role === 'admin').length} أدمن</p>
+          </div>
+          <div className="item metric">
+            <h3>الموافقات المفتوحة</h3>
+            <p style={{ fontSize: 28, fontWeight: 900, color: openApprovals.length > 0 ? 'var(--warn)' : 'var(--good)' }}>{openApprovals.length}</p>
+            <p>طلبات محتاجة مراجعة</p>
+          </div>
+          <div className="item metric">
+            <h3>الخطط النشطة</h3>
+            <p style={{ fontSize: 28, fontWeight: 900, color: 'var(--text)' }}>{plans.length}</p>
+            <p>خطة تسعير متاحة</p>
+          </div>
+          <div className="item metric">
+            <h3>رسائل فاشلة</h3>
+            <p style={{ fontSize: 28, fontWeight: 900, color: (messageSummary?.retryableFailed ?? 0) > 0 ? 'var(--bad)' : 'var(--good)' }}>{messageSummary?.retryableFailed ?? 0}</p>
+            <button className="btn secondary" onClick={retryFailedMessages} style={{ marginTop: 8, fontSize: 13 }}>إعادة المحاولة</button>
+          </div>
+          <div className="item metric">
+            <h3>Provisioning</h3>
+            <p style={{ fontSize: 28, fontWeight: 900, color: failedJobs.length > 0 ? 'var(--bad)' : 'var(--good)' }}>{failedJobs.length} فشل</p>
+            <p>Jobs: {jobs.length} · فاشلة: {failedJobs.length}</p>
+          </div>
+          <div className="item metric">
+            <h3>Dify Gateway</h3>
+            <p style={{ fontSize: 16 }}>{difyStatus ? `${difyStatus.mode} · ${difyStatus.ready ? '✅ جاهز' : '❌ مش جاهز'}` : '—'}</p>
+            <p>Token: {difyStatus?.tokenConfigured ? '✅' : '❌'}</p>
+          </div>
+        </div>
 
-    <section style={{marginTop: 32}}>
-      <h2>Channel message queue monitoring</h2>
-      <div className="item">
-        <p>يراقب failed/retryable/dead-letter inbound events لقنوات WhatsApp وMessenger قبل hardening الإنتاج.</p>
-        <p>Retryable failed: <strong>{messageSummary?.retryableFailed ?? 0}</strong> · Dead-letter: <strong>{messageSummary?.deadLettered ?? 0}</strong></p>
-        {messageSummary?.oldestFailedAt && <p>Oldest failed: {new Date(messageSummary.oldestFailedAt).toLocaleString()}</p>}
-        <p>WhatsApp: {JSON.stringify(messageSummary?.byChannel?.whatsapp || {})}</p>
-        <p>Messenger: {JSON.stringify(messageSummary?.byChannel?.messenger || {})}</p>
-        <button className="btn" onClick={retryFailedMessages} disabled={!adminToken}>Retry due failed messages</button>
-      </div>
-    </section>
+        <div className="item" style={{ marginTop: 24 }}>
+          <h3>محتوى الموقع</h3>
+          <p>{contentBlocks.length} بلوك محتوى متخزن</p>
+          {contentBlocks.slice(0, 5).map(b => (
+            <div key={b.id} style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid var(--line)' }}>
+              <span style={{ color: 'var(--brand2)' }}>{b.key}</span>
+              <span style={{ color: 'var(--muted)', maxWidth: '60%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{b.value}</span>
+            </div>
+          ))}
+        </div>
+      </>}
 
-    <section style={{marginTop: 32}}>
-      <h2>Audit logs</h2>
-      {auditLogs.length === 0 && <p>لا توجد audit logs حتى الآن.</p>}
-      {auditLogs.slice(0, 20).map(log => <div className="item" key={log.id} style={{marginBottom: 12}}>
-        <strong>{log.action}</strong>
-        <p>{new Date(log.createdAt).toLocaleString()} · Actor: {log.actorUser?.email || log.actorUserId || 'system'} · Org: {log.organization?.name || log.organizationId || 'n/a'}</p>
-        <p>Target: {log.targetType || 'n/a'} · {log.targetId || 'n/a'}</p>
-      </div>)}
-    </section>
-  </main>
+      {/* ── Plans Tab ────────────────────────────────────── */}
+      {tab === 'plans' && <section style={{ marginTop: 24 }}>
+        <div className="section-title"><span>خطط التسعير</span></div>
+
+        {/* Plan Form */}
+        <div className="item" style={{ marginBottom: 20 }}>
+          <h3>{editingPlan ? 'تعديل خطة' : 'إضافة خطة جديدة'}</h3>
+          <div className="grid" style={{ gridTemplateColumns: '1fr 1fr' }}>
+            <div>
+              <label style={{ color: 'var(--muted)', fontSize: 13 }}>اسم الخطة</label>
+              <input className="input" value={planForm.name || ''} onChange={e => setPlanForm({ ...planForm, name: e.target.value })} placeholder="مثلاً: Enterprise" />
+            </div>
+            <div>
+              <label style={{ color: 'var(--muted)', fontSize: 13 }}>السعر الشهري (جنيه)</label>
+              <input className="input" type="number" value={planForm.monthlyPriceEgp || ''} onChange={e => setPlanForm({ ...planForm, monthlyPriceEgp: Number(e.target.value) })} />
+            </div>
+            <div>
+              <label style={{ color: 'var(--muted)', fontSize: 13 }}>حد الرسائل الشهري</label>
+              <input className="input" type="number" value={planForm.messageLimit || ''} onChange={e => setPlanForm({ ...planForm, messageLimit: Number(e.target.value) })} />
+            </div>
+            <div>
+              <label style={{ color: 'var(--muted)', fontSize: 13 }}>حد القنوات</label>
+              <input className="input" type="number" value={planForm.channelLimit || ''} onChange={e => setPlanForm({ ...planForm, channelLimit: Number(e.target.value) })} />
+            </div>
+            <div>
+              <label style={{ color: 'var(--muted)', fontSize: 13 }}>حد المستخدمين</label>
+              <input className="input" type="number" value={planForm.seatLimit || ''} onChange={e => setPlanForm({ ...planForm, seatLimit: Number(e.target.value) })} />
+            </div>
+            <div style={{ display: 'flex', alignItems: 'end', gap: 12 }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, color: 'var(--muted)', fontSize: 14 }}>
+                <input type="checkbox" checked={!!planForm.requiresManualApproval} onChange={e => setPlanForm({ ...planForm, requiresManualApproval: e.target.checked })} />
+                موافقة يدوية
+              </label>
+            </div>
+          </div>
+          <div className="cta">
+            <button className="btn" onClick={savePlan}>{editingPlan ? 'حفظ التعديلات' : 'إضافة الخطة'}</button>
+            {editingPlan && <button className="btn secondary" onClick={() => { setEditingPlan(null); setPlanForm({ name: '', monthlyPriceEgp: 0, messageLimit: 1000, channelLimit: 1, seatLimit: 1, requiresManualApproval: false }); }}>إلغاء</button>}
+          </div>
+        </div>
+
+        {/* Plans Table */}
+        <div className="item">
+          <table className="admin-table">
+            <thead>
+              <tr><th>الخطة</th><th>السعر</th><th>الرسائل</th><th>القنوات</th><th>المستخدمين</th><th>موافقة</th><th>إجراءات</th></tr>
+            </thead>
+            <tbody>
+              {plans.map(p => (
+                <tr key={p.id}>
+                  <td><strong>{p.name}</strong><br /><span style={{ color: 'var(--muted)', fontSize: 12 }}>{p.id}</span></td>
+                  <td>{p.monthlyPriceEgp.toLocaleString()} ج.م</td>
+                  <td>{p.messageLimit.toLocaleString()}</td>
+                  <td>{p.channelLimit}</td>
+                  <td>{p.seatLimit}</td>
+                  <td>{p.requiresManualApproval ? '✅' : '❌'}</td>
+                  <td>
+                    <button className="btn secondary" onClick={() => startEditPlan(p)} style={{ fontSize: 12, padding: '6px 12px' }}>تعديل</button>
+                    <button className="btn secondary" onClick={() => deletePlan(p.id)} style={{ fontSize: 12, padding: '6px 12px', marginRight: 6, borderColor: 'var(--bad)', color: '#fca5a5' }}>حذف</button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {plans.length === 0 && <p style={{ textAlign: 'center', padding: 32 }}>لا توجد خطط تسعير</p>}
+        </div>
+      </section>}
+
+      {/* ── Users Tab ────────────────────────────────────── */}
+      {tab === 'users' && <section style={{ marginTop: 24 }}>
+        <div className="section-title"><span>إدارة المستخدمين</span><span className="status-pill good">{users.length} مستخدم</span></div>
+
+        <input className="input" placeholder="بحث بالاسم أو البريد أو الشركة..." value={userFilter} onChange={e => setUserFilter(e.target.value)} style={{ marginBottom: 16 }} />
+
+        <div className="item">
+          <table className="admin-table">
+            <thead>
+              <tr><th>الاسم</th><th>البريد</th><th>الدور</th><th>الحالة</th><th>الشركة</th><th>التسجيل</th><th>إجراءات</th></tr>
+            </thead>
+            <tbody>
+              {filteredUsers.map(u => (
+                <tr key={u.id} style={{ opacity: u.status === 'suspended' ? 0.5 : 1 }}>
+                  <td><strong>{u.name}</strong></td>
+                  <td style={{ fontSize: 13 }}>{u.email}</td>
+                  <td>
+                    <span className={`status-pill ${u.role === 'admin' ? 'good' : ''}`} style={{ fontSize: 11, padding: '4px 10px' }}>
+                      {u.role === 'admin' ? 'أدمن' : u.role === 'support' ? 'دعم' : 'عميل'}
+                    </span>
+                  </td>
+                  <td>
+                    <span className={`status-pill ${u.status === 'active' ? 'good' : u.status === 'suspended' ? 'bad' : ''}`} style={{ fontSize: 11, padding: '4px 10px' }}>
+                      {u.status === 'active' ? 'نشط' : u.status === 'suspended' ? 'معلق' : u.status}
+                    </span>
+                  </td>
+                  <td>{u.organization?.name || '—'}</td>
+                  <td style={{ fontSize: 12, color: 'var(--muted)' }}>{new Date(u.createdAt).toLocaleDateString('ar-EG')}</td>
+                  <td>
+                    {u.role !== 'admin' && <>
+                      {u.status === 'active'
+                        ? <button className="btn secondary" onClick={() => updateUser(u.id, { status: 'suspended' })} style={{ fontSize: 11, padding: '4px 10px', borderColor: 'var(--bad)', color: '#fca5a5' }}>تعليق</button>
+                        : <button className="btn secondary" onClick={() => updateUser(u.id, { status: 'active' })} style={{ fontSize: 11, padding: '4px 10px' }}>تفعيل</button>
+                      }
+                      {u.role === 'customer' && <button className="btn secondary" onClick={() => updateUser(u.id, { role: 'support' })} style={{ fontSize: 11, padding: '4px 10px', marginRight: 4 }}>دعم</button>}
+                      {u.role === 'support' && <button className="btn secondary" onClick={() => updateUser(u.id, { role: 'customer' })} style={{ fontSize: 11, padding: '4px 10px', marginRight: 4 }}>عميل</button>}
+                    </>}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {filteredUsers.length === 0 && <p style={{ textAlign: 'center', padding: 32 }}>لا توجد نتائج</p>}
+        </div>
+      </section>}
+
+      {/* ── Content Tab ──────────────────────────────────── */}
+      {tab === 'content' && <section style={{ marginTop: 24 }}>
+        <div className="section-title"><span>إدارة المحتوى</span><span className="status-pill good">{contentBlocks.length} بلوك</span></div>
+
+        {/* Content Form */}
+        <div className="item" style={{ marginBottom: 20 }}>
+          <h3>{editingContent ? 'تعديل محتوى' : 'إضافة محتوى جديد'}</h3>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 3fr', gap: 12 }}>
+            <div>
+              <label style={{ color: 'var(--muted)', fontSize: 13 }}>المفتاح (key)</label>
+              <input className="input" value={contentForm.key} onChange={e => setContentForm({ ...contentForm, key: e.target.value })} placeholder="مثلاً: hero_title" disabled={!!editingContent} />
+            </div>
+            <div>
+              <label style={{ color: 'var(--muted)', fontSize: 13 }}>القيمة</label>
+              <textarea className="input" rows={3} value={contentForm.value} onChange={e => setContentForm({ ...contentForm, value: e.target.value })} placeholder="النص أو المحتوى..." style={{ resize: 'vertical' }} />
+            </div>
+          </div>
+          <div className="cta">
+            <button className="btn" onClick={saveContent}>{editingContent ? 'حفظ' : 'إضافة'}</button>
+            {editingContent && <button className="btn secondary" onClick={() => { setEditingContent(null); setContentForm({ key: '', value: '' }); }}>إلغاء</button>}
+          </div>
+        </div>
+
+        {/* Content List */}
+        {contentBlocks.map(b => (
+          <div className="item" key={b.id} style={{ marginBottom: 12 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start' }}>
+              <div>
+                <strong style={{ color: 'var(--brand2)' }}>{b.key}</strong>
+                <span style={{ color: 'var(--muted)', fontSize: 12, marginRight: 12 }}>{b.type} · آخر تحديث: {new Date(b.updatedAt).toLocaleDateString('ar-EG')}</span>
+                <p style={{ marginTop: 6 }}>{b.value}</p>
+              </div>
+              <div style={{ display: 'flex', gap: 6 }}>
+                <button className="btn secondary" onClick={() => startEditContent(b)} style={{ fontSize: 12, padding: '6px 12px' }}>تعديل</button>
+                <button className="btn secondary" onClick={() => deleteContent(b.key)} style={{ fontSize: 12, padding: '6px 12px', borderColor: 'var(--bad)', color: '#fca5a5' }}>حذف</button>
+              </div>
+            </div>
+          </div>
+        ))}
+        {contentBlocks.length === 0 && <div className="item"><p style={{ textAlign: 'center', padding: 32 }}>لا يوجد محتوى بعد. أضف بلوكات زي hero_title و hero_subtitle و footer_text</p></div>}
+      </section>}
+
+      {/* ── Approvals Tab ────────────────────────────────── */}
+      {tab === 'approvals' && <section style={{ marginTop: 24 }}>
+        <div className="section-title"><span>طلبات الموافقة</span><span className={`status-pill ${openApprovals.length > 0 ? 'warn' : 'good'}`}>{openApprovals.length} مفتوحة</span></div>
+        {approvals.length === 0 && <div className="item"><p>لا توجد طلبات موافقة</p></div>}
+        {approvals.map(row => <div className="item" key={row.approval.id} style={{ marginBottom: 12 }}>
+          <strong>{row.organization?.name || row.approval.id}</strong>
+          <p>الدفع: {row.payment?.method} — {row.payment?.amountEgp?.toLocaleString()} ج.م — {row.payment?.status}</p>
+          <p>المرجع: {row.payment?.reference || 'بدون'} · حالة الشركة: {row.organization?.status}</p>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 8 }}>
+            <span className={`status-pill ${row.approval.status === 'open' ? 'warn' : 'good'}`} style={{ fontSize: 11, padding: '4px 10px' }}>
+              {row.approval.status === 'open' ? 'مفتوحة' : 'تمت المراجعة'}
+            </span>
+            {row.approval.status === 'open' && row.payment && <button className="btn" onClick={() => approve(row.payment!.id)} style={{ fontSize: 12 }}>اعتماد الدفع</button>}
+          </div>
+        </div>)}
+      </section>}
+
+      {/* ── Jobs Tab ─────────────────────────────────────── */}
+      {tab === 'jobs' && <section style={{ marginTop: 24 }}>
+        <div className="section-title"><span>Provisioning Jobs</span><span className={`status-pill ${failedJobs.length > 0 ? 'bad' : 'good'}`}>{jobs.length} job · {failedJobs.length} فاشل</span></div>
+        {jobs.length === 0 && <div className="item"><p>لا توجد provisioning jobs</p></div>}
+        {jobs.map(job => <div className="item" key={job.id} style={{ marginBottom: 12 }}>
+          <strong>{job.organization?.name || job.organizationId}</strong>
+          <p>الحالة: <span className={`status-pill ${job.status === 'completed' ? 'good' : job.status === 'failed' ? 'bad' : 'warn'}`} style={{ fontSize: 11, padding: '2px 8px' }}>{job.status}</span> · النوع: {job.type} · المحاولات: {job.attempts}/{job.maxAttempts || 3}</p>
+          <p>الشركة: {job.organization?.status} · Tenant: {job.organization?.difyTenantId || 'لم يُنشأ بعد'}</p>
+          {job.lastError && <p style={{ color: 'var(--bad)', fontSize: 13 }}>خطأ: {job.lastError}</p>}
+          {(job.status === 'queued' || job.status === 'failed') && <button className="btn" onClick={() => runJob(job.id)} style={{ fontSize: 12, marginTop: 8 }}>{job.status === 'failed' ? 'إعادة المحاولة' : 'تشغيل'}</button>}
+        </div>)}
+      </section>}
+
+      {/* ── Audit Logs Tab ───────────────────────────────── */}
+      {tab === 'logs' && <section style={{ marginTop: 24 }}>
+        <div className="section-title"><span>سجل الأحداث</span><span className="status-pill good">{auditLogs.length} حدث</span></div>
+        {auditLogs.length === 0 && <div className="item"><p>لا توجد أحداث مسجلة</p></div>}
+        {auditLogs.slice(0, 50).map(log => <div className="item" key={log.id} style={{ marginBottom: 8 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+            <strong>{log.action}</strong>
+            <span style={{ color: 'var(--muted)', fontSize: 12 }}>{new Date(log.createdAt).toLocaleString('ar-EG')}</span>
+          </div>
+          <p style={{ fontSize: 13 }}>بواسطة: {log.actorUser?.email || 'system'} · الشركة: {log.organization?.name || '—'} · الهدف: {log.targetType || '—'} / {log.targetId || '—'}</p>
+        </div>)}
+      </section>}
+    </>}
+  </main>;
 }

@@ -13,6 +13,7 @@ model User {
   email             String        @unique
   phone             String?
   role              String
+  status            String   @default("active")
   passwordHash      String?
   preferredLanguage String
   organizationId    String?
@@ -230,4 +231,15 @@ model MessageEvent {
   @@index([channelId, createdAt])
   @@index([status])
   @@index([status, nextRetryAt])
+}
+
+model ContentBlock {
+  id        String   @id
+  key       String   @unique
+  value     String
+  type      String   @default("text")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([key])
 }
