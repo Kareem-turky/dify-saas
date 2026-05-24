@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { useAuth, RequireAuth } from '../auth';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:4000';
 
@@ -54,10 +55,12 @@ type Tab = 'overview' | 'plans' | 'users' | 'content' | 'approvals' | 'jobs' | '
 
 // ─── Component ───────────────────────────────────────────────
 export default function AdminPage() {
+  return <RequireAuth><AdminDashboard /></RequireAuth>;
+}
+
+function AdminDashboard() {
+  const { token } = useAuth();
   const [tab, setTab] = useState<Tab>('overview');
-  const [adminToken, setAdminToken] = useState('');
-  const [adminEmail, setAdminEmail] = useState('');
-  const [adminPassword, setAdminPassword] = useState('');
   const [message, setMessage] = useState('');
 
   // Data states
@@ -78,12 +81,12 @@ export default function AdminPage() {
   const [userFilter, setUserFilter] = useState('');
 
   // ─── API helpers ─────────────────────────────────────────────
-  const auth = { Authorization: `Bearer ${adminToken}` };
+  const authHeaders = { Authorization: `Bearer ${token}` };
   const api = {
-    get: (url: string) => fetch(`${API_BASE}${url}`, { headers: auth }),
-    post: (url: string, body: unknown) => fetch(`${API_BASE}${url}`, { method: 'POST', headers: { ...auth, 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
-    put: (url: string, body: unknown) => fetch(`${API_BASE}${url}`, { method: 'PUT', headers: { ...auth, 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
-    del: (url: string) => fetch(`${API_BASE}${url}`, { method: 'DELETE', headers: auth }),
+    get: (url: string) => fetch(`${API_BASE}${url}`, { headers: authHeaders }),
+    post: (url: string, body: unknown) => fetch(`${API_BASE}${url}`, { method: 'POST', headers: { ...authHeaders, 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
+    put: (url: string, body: unknown) => fetch(`${API_BASE}${url}`, { method: 'PUT', headers: { ...authHeaders, 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
+    del: (url: string) => fetch(`${API_BASE}${url}`, { method: 'DELETE', headers: authHeaders }),
   };
 
   // ─── Loaders ─────────────────────────────────────────────────
@@ -97,25 +100,14 @@ export default function AdminPage() {
   async function loadMessageSummary() { const r = await api.get('/admin/message-events/summary'); if (r.ok) setMessageSummary(await r.json()); }
 
   async function refreshAll() {
-    if (!adminToken) return;
+    if (!token) return;
     setMessage('');
     try {
       await Promise.all([loadPlans(), loadUsers(), loadContent(), loadApprovals(), loadJobs(), loadAuditLogs(), loadDifyStatus(), loadMessageSummary()]);
     } catch (e) { setMessage(e instanceof Error ? e.message : 'خطأ في تحميل البيانات'); }
   }
 
-  async function loginAdmin() {
-    setMessage('جاري تسجيل الدخول...');
-    const r = await fetch(`${API_BASE}/auth/login`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email: adminEmail, password: adminPassword }),
-    });
-    const data = await r.json().catch(() => ({}));
-    if (!r.ok || data.user?.role !== 'admin') { setMessage(data.message || 'بيانات الدخول غير صحيحة'); return; }
-    localStorage.setItem('dify_saas_admin_token', data.token);
-    setAdminToken(data.token);
-    setMessage('');
-  }
+
 
   // ─── Plan actions ────────────────────────────────────────────
   async function savePlan() {
@@ -188,8 +180,7 @@ export default function AdminPage() {
   }
 
   // ─── Init ────────────────────────────────────────────────────
-  useEffect(() => { const t = localStorage.getItem('dify_saas_admin_token'); if (t) setAdminToken(t); }, []);
-  useEffect(() => { if (adminToken) void refreshAll(); }, [adminToken]);
+  useEffect(() => { if (token) void refreshAll(); }, [token]);
 
   const openApprovals = approvals.filter(r => r.approval.status === 'open');
   const failedJobs = jobs.filter(j => j.status === 'failed' || j.status === 'dead');
@@ -211,21 +202,14 @@ export default function AdminPage() {
   return <main className="shell admin-shell">
     {/* Header */}
     <div className="section-title">
-      <span>Fulfly AI — لوحة تحكم الأدمن</span>
-      <span className="status-pill good">admin console</span>
+      <span>لوحة تحكم الإدارة</span>
+      <span className="status-pill good">نظام التشغيل</span>
     </div>
 
-    {/* Login */}
-    {!adminToken && <section className="item glass" style={{ marginTop: 20 }}>
-      <h2>تسجيل دخول الأدمن</h2>
-      <input className="input" type="email" placeholder="البريد الإلكتروني" value={adminEmail} onChange={e => setAdminEmail(e.target.value)} />
-      <input className="input" type="password" placeholder="كلمة المرور" value={adminPassword} onChange={e => setAdminPassword(e.target.value)} />
-      <div className="cta"><button className="btn" onClick={loginAdmin}>تسجيل الدخول</button></div>
-    </section>}
 
     {message && <p style={{ color: 'var(--warn)', margin: '12px 0' }}>{message}</p>}
 
-    {adminToken && <>
+    <>
       {/* Tab Navigation */}
       <nav className="admin-tabs">
         {tabs.map(t => (
@@ -459,7 +443,7 @@ export default function AdminPage() {
 
       {/* ── Jobs Tab ─────────────────────────────────────── */}
       {tab === 'jobs' && <section style={{ marginTop: 24 }}>
-        <div className="section-title"><span>Provisioning Jobs</span><span className={`status-pill ${failedJobs.length > 0 ? 'bad' : 'good'}`}>{jobs.length} job · {failedJobs.length} فاشل</span></div>
+        <div className="section-title"><span>مهام التجهيز</span><span className={`status-pill ${failedJobs.length > 0 ? 'bad' : 'good'}`}>{jobs.length} مهمة · {failedJobs.length} فاشل</span></div>
         {jobs.length === 0 && <div className="item"><p>لا توجد provisioning jobs</p></div>}
         {jobs.map(job => <div className="item" key={job.id} style={{ marginBottom: 12 }}>
           <strong>{job.organization?.name || job.organizationId}</strong>
@@ -482,6 +466,6 @@ export default function AdminPage() {
           <p style={{ fontSize: 13 }}>بواسطة: {log.actorUser?.email || 'system'} · الشركة: {log.organization?.name || '—'} · الهدف: {log.targetType || '—'} / {log.targetId || '—'}</p>
         </div>)}
       </section>}
-    </>}
+    </>
   </main>;
 }
